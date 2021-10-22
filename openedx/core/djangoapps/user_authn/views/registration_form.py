@@ -13,7 +13,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.core.validators import RegexValidator, ValidationError, slug_re
 from django.forms import widgets
 from django.urls import reverse
-from django.utils.translation import ugettext as _
+from django.utils.translation import gettext as _
 from django_countries import countries
 
 from common.djangoapps import third_party_auth
@@ -335,6 +335,9 @@ class RegistrationFormFactory:
         return self._extra_fields_setting.get(field_name) == "required"
 
     def __init__(self):
+
+        if not settings.COLLECT_YEAR_OF_BIRTH and 'year_of_birth' in self.EXTRA_FIELDS:
+            self.EXTRA_FIELDS.remove('year_of_birth')
 
         # Backwards compatibility: Honor code is required by default, unless
         # explicitly set to "optional" in Django settings.
