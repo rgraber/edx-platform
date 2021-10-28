@@ -19,6 +19,7 @@ from rest_framework.request import Request
 
 from lms.djangoapps.courseware.courses import get_course_with_access
 from lms.djangoapps.courseware.exceptions import CourseAccessRedirect
+from openedx.core.djangoapps.discussions.utils import get_accessible_discussion_xblocks
 from openedx.core.djangoapps.django_comment_common.comment_client.comment import Comment
 from openedx.core.djangoapps.django_comment_common.comment_client.thread import Thread
 from openedx.core.djangoapps.django_comment_common.comment_client.utils import CommentClientRequestError
@@ -62,11 +63,10 @@ from ..django_comment_client.base.views import (
     track_voted_event,
 )
 from ..django_comment_client.utils import (
-    get_accessible_discussion_xblocks,
     get_group_id_for_user,
     is_commentable_divided,
 )
-
+from xmodule.tabs import CourseTabList
 
 User = get_user_model()
 
@@ -107,8 +107,11 @@ def _get_course(course_key, user):
         # Convert 404s into CourseNotFoundErrors.
         # Raise course not found if the user cannot access the course
         raise CourseNotFoundError("Course not found.") from err
-    if not any(tab.type == 'discussion' and tab.is_enabled(course, user) for tab in course.tabs):
+
+    discussion_tab = CourseTabList.get_tab_by_type(course.tabs, 'discussion')
+    if not (discussion_tab and discussion_tab.is_enabled(course, user)):
         raise DiscussionDisabledError("Discussion is disabled for the course.")
+
     return course
 
 
