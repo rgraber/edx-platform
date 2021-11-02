@@ -73,7 +73,6 @@ attrs==21.2.0
     #   aiohttp
     #   edx-ace
     #   openedx-events
-    #   outcome
     #   pytest
 babel==2.9.1
     # via
@@ -506,6 +505,7 @@ edx-django-utils==4.4.0
     #   edx-rest-api-client
     #   edx-toggles
     #   edx-when
+    #   event-tracking
     #   ora2
     #   super-csv
 edx-drf-extensions==8.0.0
@@ -519,7 +519,7 @@ edx-drf-extensions==8.0.0
     #   edx-rbac
     #   edx-when
     #   edxval
-edx-enterprise==3.31.1
+edx-enterprise==3.33.1
     # via
     #   -c requirements/edx/../constraints.txt
     #   -r requirements/edx/base.txt
@@ -532,7 +532,7 @@ edx-lint==5.2.0
     # via -r requirements/edx/testing.in
 edx-milestones==0.3.3
     # via -r requirements/edx/base.txt
-edx-name-affirmation==1.0.3
+edx-name-affirmation==2.0.0
     # via -r requirements/edx/base.txt
 edx-opaque-keys[django]==2.2.2
     # via
@@ -553,7 +553,7 @@ edx-opaque-keys[django]==2.2.2
     #   xmodule
 edx-organizations==6.10.0
     # via -r requirements/edx/base.txt
-edx-proctoring==4.2.0
+edx-proctoring==4.5.0
     # via
     #   -r requirements/edx/base.txt
     #   edx-proctoring-proctortrack
@@ -608,7 +608,7 @@ enmerkar==0.7.1
     #   enmerkar-underscore
 enmerkar-underscore==2.1.0
     # via -r requirements/edx/base.txt
-event-tracking==1.1.1
+event-tracking==1.1.4
     # via
     #   -r requirements/edx/base.txt
     #   edx-proctoring

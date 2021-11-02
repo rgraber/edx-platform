@@ -19,8 +19,9 @@ from django.test.utils import override_settings
 from lms.djangoapps.courseware.field_overrides import OverrideFieldData
 from openedx.core.djangolib.testing.utils import CacheIsolationMixin, CacheIsolationTestCase, FilteredQueryCountMixin
 from openedx.core.lib.tempdir import mkdtemp_clean
+from common.djangoapps.split_modulestore_django.models import SplitModulestoreCourseIndex
 from common.djangoapps.student.models import CourseEnrollment
-from common.djangoapps.student.tests.factories import AdminFactory, UserFactory
+from common.djangoapps.student.tests.factories import AdminFactory, UserFactory, InstructorFactory
 from common.djangoapps.student.tests.factories import StaffFactory
 from xmodule.contentstore.django import _CONTENTSTORE
 from xmodule.modulestore import ModuleStoreEnum
@@ -28,13 +29,13 @@ from xmodule.modulestore.django import SignalHandler, clear_existing_modulestore
 from xmodule.modulestore.tests.factories import XMODULE_FACTORY_LOCK
 from xmodule.modulestore.tests.mongo_connection import MONGO_HOST, MONGO_PORT_NUM
 
-
 class CourseUserType(Enum):
     """
     Types of users to be used when testing a course.
     """
     ANONYMOUS = 'anonymous'
     COURSE_STAFF = 'course_staff'
+    COURSE_INSTRUCTOR = 'course_instructor'
     ENROLLED = 'enrolled'
     GLOBAL_STAFF = 'global_staff'
     UNENROLLED = 'unenrolled'
@@ -371,18 +372,22 @@ class ModuleStoreTestUsersMixin():
             return AnonymousUser()
 
         is_enrolled = user_type is CourseUserType.ENROLLED
-        is_unenrolled_staff = user_type is CourseUserType.UNENROLLED_STAFF
 
         # Set up the test user
-        if is_unenrolled_staff:
+        if user_type is CourseUserType.UNENROLLED_STAFF:
             user = StaffFactory(course_key=course.id, password=self.TEST_PASSWORD)
         elif user_type is CourseUserType.GLOBAL_STAFF:
             user = AdminFactory(password=self.TEST_PASSWORD)
+        elif user_type is CourseUserType.COURSE_INSTRUCTOR:
+            user = InstructorFactory(course_key=course.id, password=self.TEST_PASSWORD)
         else:
             user = UserFactory(password=self.TEST_PASSWORD)
+
         self.client.login(username=user.username, password=self.TEST_PASSWORD)
+
         if is_enrolled:
             CourseEnrollment.enroll(user, course.id)
+
         return user
 
 
@@ -465,6 +470,12 @@ class SharedModuleStoreTestCase(
         cls.end_modulestore_isolation()
         super().tearDownClass()
 
+        # Overly broad hammer that breaks abstraction barrier to clear data from
+        # the table underlying the Django ORM backed modulestore active versions
+        # lookup. This has to go _after_ the super().tearDownClass call above,
+        # or it doesn't work.
+        SplitModulestoreCourseIndex.objects.all().delete()
+
     def setUp(self):
         # OverrideFieldData.provider_classes is always reset to `None` so
         # that they're recalculated for every test
@@ -524,6 +535,12 @@ class ModuleStoreTestCase(
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
+
+        # Overly broad hammer that breaks abstraction barrier to clear data from
+        # the table underlying the Django ORM backed modulestore active versions
+        # lookup. This has to go _after_ the super().tearDownClass call above,
+        # or it doesn't work.
+        SplitModulestoreCourseIndex.objects.all().delete()
 
     def setUp(self):
         """

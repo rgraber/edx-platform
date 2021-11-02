@@ -474,8 +474,15 @@ FEATURES = {
     'ENABLE_V2_CERT_DISPLAY_SETTINGS': False,
 }
 
-# VAN-754 - Year of birth field put behind a flag to make it available for openedX.
-COLLECT_YEAR_OF_BIRTH = True
+# .. toggle_name: ENABLE_COPPA_COMPLIANCE
+# .. toggle_implementation: DjangoSetting
+# .. toggle_default: False
+# .. toggle_description: When True, inforces COPPA compliance and removes YOB field from registration form and accounnt
+# .. settings page. Also hide YOB banner from profile page.
+# .. toggle_use_cases: open_edx
+# .. toggle_creation_date: 2021-10-27
+# .. toggle_tickets: 'https://openedx.atlassian.net/browse/VAN-622'
+ENABLE_COPPA_COMPLIANCE = False
 
 ENABLE_JASMINE = False
 
@@ -1374,13 +1381,15 @@ CELERY_DEFAULT_EXCHANGE = f'edx.{QUEUE_VARIANT}core'
 
 HIGH_PRIORITY_QUEUE = f'edx.{QUEUE_VARIANT}core.high'
 DEFAULT_PRIORITY_QUEUE = f'edx.{QUEUE_VARIANT}core.default'
+LOW_PRIORITY_QUEUE = f'edx.{QUEUE_VARIANT}core.low'
 
 CELERY_DEFAULT_QUEUE = DEFAULT_PRIORITY_QUEUE
 CELERY_DEFAULT_ROUTING_KEY = DEFAULT_PRIORITY_QUEUE
 
 CELERY_QUEUES = {
     HIGH_PRIORITY_QUEUE: {},
-    DEFAULT_PRIORITY_QUEUE: {}
+    DEFAULT_PRIORITY_QUEUE: {},
+    LOW_PRIORITY_QUEUE: {},
 }
 
 # Queues configuration
@@ -1802,6 +1811,7 @@ OPTIONAL_APPS = (
     ('consent', None),
     ('integrated_channels.integrated_channel', None),
     ('integrated_channels.degreed', None),
+    ('integrated_channels.degreed2', None),
     ('integrated_channels.sap_success_factors', None),
     ('integrated_channels.xapi', None),
     ('integrated_channels.cornerstone', None),
@@ -2168,7 +2178,7 @@ SOFTWARE_SECURE_VERIFICATION_ROUTING_KEY = 'edx.lms.core.default'
 POLICY_CHANGE_TASK_RATE_LIMIT = '300/h'
 
 ############## Settings for CourseGraph ############################
-COURSEGRAPH_JOB_QUEUE = DEFAULT_PRIORITY_QUEUE
+COURSEGRAPH_JOB_QUEUE = LOW_PRIORITY_QUEUE
 
 ########## Settings for video transcript migration tasks ############
 VIDEO_TRANSCRIPT_MIGRATIONS_JOB_QUEUE = DEFAULT_PRIORITY_QUEUE

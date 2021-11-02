@@ -65,6 +65,7 @@ def send_ace_message(goal):
         'days_per_week': goal.days_per_week,
         'course_url': course_home_url,
         'goals_unsubscribe_url': goals_unsubscribe_url,
+        'image_url': settings.LMS_ROOT_URL + settings.STATIC_URL,
         'unsubscribe_url': None,  # We don't want to include the default unsubscribe link
     })
 
@@ -73,7 +74,8 @@ def send_ace_message(goal):
         app_label="course_goals",
         recipient=Recipient(user.id, user.email),
         language=get_user_preference(user, LANGUAGE_KEY),
-        context=message_context
+        context=message_context,
+        options={'transactional': True},
     )
 
     with emulate_http_request(site, user):
