@@ -15,8 +15,8 @@ from django.db import transaction
 from opaque_keys.edx.keys import CourseKey
 from edx_ace import ace
 from edx_ace.recipient import Recipient
+from eventtracking import tracker
 
-from common.djangoapps.track import segment
 from openedx.core.djangoapps.site_configuration import helpers as configuration_helpers
 from openedx.core.djangoapps.user_api.accounts.api import get_email_validation_error
 from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
@@ -29,6 +29,7 @@ log = logging.getLogger(__name__)
 
 POST_EMAIL_KEY = 'post:email'
 REAL_IP_KEY = 'openedx.core.djangoapps.util.ratelimit.real_ip'
+USER_SENT_EMAIL_SAVE_FOR_LATER = 'edx.bi.user.save.for.later.email.sent'
 
 
 class SaveForLaterApiView(APIView):
@@ -59,18 +60,19 @@ class SaveForLaterApiView(APIView):
             }
         """
         user = request.user
-        course_id = request.POST.get('course_id')
-        email = request.POST.get('email')
-        marketing_url = request.POST.get('marketing_url')
-        org_img_url = request.POST.get('org_img_url')
+        data = request.data
+        course_id = data.get('course_id')
+        email = data.get('email')
+        marketing_url = data.get('marketing_url')
+        org_img_url = data.get('org_img_url')
 
         course_key = CourseKey.from_string(course_id)
 
         if getattr(request, 'limited', False):
-            return Response({'result': 'failure'}, status=403)
+            return Response({'error_code': 'rate-limited'}, status=403)
 
         if get_email_validation_error(email):
-            return Response({'result': 'failure'}, status=400)
+            return Response({'error_code': 'incorrect-email'}, status=400)
 
         try:
             course_overview = CourseOverview.get_from_id(course_key)
@@ -80,7 +82,7 @@ class SaveForLaterApiView(APIView):
                 course_id=course_id,
             )
         except CourseOverview.DoesNotExist:
-            return Response({'result': 'failure'}, status=404)
+            return Response({'error_code': 'course-not-found'}, status=404)
 
         site = Site.objects.get_current()
         message_context = get_base_template_context(site)
@@ -104,16 +106,16 @@ class SaveForLaterApiView(APIView):
         )
         try:
             ace.send(msg)
-            segment.track(
-                user.id,
-                'edx.bi.user.sent.email.save.for.later',
+            tracker.emit(
+                USER_SENT_EMAIL_SAVE_FOR_LATER,
                 {
+                    'user_id': user.id,
                     'category': 'save-for-later',
                     'type': 'course' if course_id else 'program'
                 }
             )
         except Exception:  # pylint: disable=broad-except
             log.warning('Unable to send save for later email ', exc_info=True)
-            return Response({'result': 'failure'}, status=400)
+            return Response({'error_code': 'email-not-send'}, status=400)
         else:
             return Response({'result': 'success'}, status=200)
