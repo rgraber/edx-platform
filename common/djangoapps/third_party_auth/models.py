@@ -9,6 +9,8 @@ import logging
 import re
 
 from config_models.models import ConfigurationModel, cache
+from simple_history import register
+from social_django.models import UserSocialAuth
 from django.conf import settings
 from django.contrib.sites.models import Site
 from django.core.exceptions import ValidationError
@@ -36,6 +38,20 @@ REGISTRATION_FORM_FIELD_BLACKLIST = [
     'name',
     'username'
 ]
+
+
+def register_model_LMS(model, package_name):
+    """
+    Registers Simple History for a Model inside LMS Only
+    """
+
+    AUTH_FEATURES_KEY = 'ENABLE_THIRD_PARTY_AUTH'
+    AUTH_FEATURE_ENABLED = AUTH_FEATURES_KEY in settings.FEATURES
+
+    if AUTH_FEATURE_ENABLED:
+        register(model, app=package_name)
+
+register_model_LMS(UserSocialAuth, __package__)
 
 
 # A dictionary of {name: class} entries for each python-social-auth backend available.
