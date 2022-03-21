@@ -6,13 +6,13 @@ from uuid import uuid4
 
 from django.db import transaction
 
-from openedx.core.djangoapps.discussions.data import CourseDiscussionConfigurationData
+from openedx_events.learning.data import CourseDiscussionConfigurationData
+from openedx_events.learning.signals import COURSE_DISCUSSIONS_CHANGED
 from openedx.core.djangoapps.discussions.models import (
     DEFAULT_PROVIDER_TYPE,
     DiscussionTopicLink,
     DiscussionsConfiguration,
 )
-from openedx.core.djangoapps.discussions.signals import COURSE_DISCUSSIONS_UPDATED
 
 log = logging.getLogger(__name__)
 
@@ -66,7 +66,10 @@ def update_course_discussion_config(configuration: CourseDiscussionConfiguration
                 topic_link.enabled_in_context = False
             else:
                 topic_link.enabled_in_context = True
+                topic_link.ordering = topic_context.ordering
                 topic_link.title = topic_context.title
+                if topic_context.external_id:
+                    topic_link.external_id = topic_context.external_id
             topic_link.save()
         log.info(f"Creating new discussion topic links for {course_key}")
 
@@ -77,6 +80,7 @@ def update_course_discussion_config(configuration: CourseDiscussionConfiguration
                 title=topic_context.title,
                 provider_id=provider_id,
                 external_id=topic_context.external_id or uuid4(),
+                ordering=topic_context.ordering,
                 enabled_in_context=True,
             )
             for topic_context in new_topic_map.values()
@@ -94,4 +98,4 @@ def update_course_discussion_config(configuration: CourseDiscussionConfiguration
             ).save()
 
 
-COURSE_DISCUSSIONS_UPDATED.connect(handle_course_discussion_config_update)
+COURSE_DISCUSSIONS_CHANGED.connect(handle_course_discussion_config_update)

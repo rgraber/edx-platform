@@ -22,7 +22,6 @@ from django.test.client import RequestFactory
 from django.test.utils import override_settings
 from django.urls import reverse
 from django.utils.http import int_to_base36
-from edx_toggles.toggles.testutils import override_waffle_flag
 from freezegun import freeze_time
 from oauth2_provider import models as dot_models
 from pytz import UTC
@@ -35,8 +34,7 @@ from openedx.core.djangoapps.user_api.tests.test_views import UserAPITestCase
 from openedx.core.djangoapps.user_api.accounts import EMAIL_MAX_LENGTH, EMAIL_MIN_LENGTH
 from openedx.core.djangoapps.user_authn.views.password_reset import (
     SETTING_CHANGE_INITIATED, password_reset, LogistrationPasswordResetView,
-    PasswordResetConfirmWrapper)
-from openedx.core.djangoapps.user_authn.toggles import REDIRECT_TO_AUTHN_MICROFRONTEND
+    PasswordResetConfirmWrapper, password_change_request_handler)
 from openedx.core.djangolib.testing.utils import CacheIsolationTestCase
 from common.djangoapps.student.tests.factories import TEST_PASSWORD, UserFactory
 from common.djangoapps.student.tests.test_configuration_overrides import fake_get_value
@@ -179,6 +177,55 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         # then the rate limiter should kick in and give a HttpForbidden response
         bad_resp = password_reset(password_reset_req)
         assert bad_resp.status_code == 403
+
+        cache.clear()
+
+    @patch("openedx.core.djangoapps.user_authn.views.password_reset.request_password_change", Mock(return_value=None))
+    def test_password_change_non_staff_user(self):
+        """
+        Test that password reset endpoint does not allow more than 1 call for non staff users.
+        """
+        cache.clear()
+        password_reset_req = self.request_factory.post(
+            '/account/password/',
+            {'email': self.user.email, 'email_from_support_tools': self.user.email},
+        )
+
+        password_reset_req.user = self.user
+        password_reset_req.is_secure = Mock(return_value=True)
+        good_resp = password_change_request_handler(password_reset_req)
+        assert good_resp.status_code == 200
+
+        bad_resp = password_change_request_handler(password_reset_req)
+        assert bad_resp.status_code == 403
+        assert bad_resp.content == b'Your previous request is in progress, please try again in a few moments.'
+
+        cache.clear()
+
+    @patch("openedx.core.djangoapps.user_authn.views.password_reset.request_password_change", Mock(return_value=None))
+    def test_password_change_staff_user(self):
+        """
+        Test that password reset endpoint allow multiple requests for staff users.
+        """
+        cache.clear()
+        password_reset_req = self.request_factory.post(
+            '/account/password/',
+            {'email': self.user.email, 'email_from_support_tools': self.user.email},
+        )
+        self.user.is_staff = True
+        password_reset_req.user = self.user
+        password_reset_req.is_secure = Mock(return_value=True)
+        good_resp = password_change_request_handler(password_reset_req)
+        assert good_resp.status_code == 200
+
+        good_resp = password_change_request_handler(password_reset_req)
+        assert good_resp.status_code == 200
+
+        good_resp = password_change_request_handler(password_reset_req)
+        assert good_resp.status_code == 200
+
+        good_resp = password_change_request_handler(password_reset_req)
+        assert good_resp.status_code == 200
 
         cache.clear()
 
@@ -325,7 +372,6 @@ class ResetPasswordTests(EventTestMixin, CacheIsolationTestCase):
         )
 
     @override_settings(FEATURES=ENABLE_AUTHN_MICROFRONTEND)
-    @override_waffle_flag(REDIRECT_TO_AUTHN_MICROFRONTEND, active=True)
     @unittest.skipUnless(settings.ROOT_URLCONF == 'lms.urls', "Test only valid in LMS")
     @ddt.data(('Crazy Awesome Site', 'Crazy Awesome Site'), ('edX', 'edX'))
     @ddt.unpack

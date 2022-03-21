@@ -7,10 +7,12 @@ Integration tests for submitting problem responses and getting grades.
 
 import json
 import os
+from datetime import datetime
 from textwrap import dedent
-
 from unittest.mock import patch
+
 import ddt
+import pytz
 from django.conf import settings
 from django.contrib.auth.models import User  # lint-amnesty, pylint: disable=imported-auth-user
 from django.db import connections
@@ -208,7 +210,11 @@ class TestSubmittingProblems(ModuleStoreTestCase, LoginEnrollmentTestCase, Probl
                 parent_location=self.chapter.location,
                 display_name=name,
                 category='sequential',
-                metadata={'graded': True, 'format': section_format, 'due': '2013-05-20T23:30'}
+                metadata={
+                    'graded': True,
+                    'format': section_format,
+                    'due': datetime(2013, 5, 20, 23, 30, tzinfo=pytz.utc),
+                },
             )
         elif reset:
             section = ItemFactory.create(
@@ -276,7 +282,7 @@ class TestSubmittingProblems(ModuleStoreTestCase, LoginEnrollmentTestCase, Probl
         Returns list of scores: [<points on hw_1>, <points on hw_2>, ..., <points on hw_n>]
         """
         return [
-            s.graded_total.earned for s in self.get_course_grade().graded_subsections_by_format['Homework'].values()
+            s.graded_total.earned for s in self.get_course_grade().graded_subsections_by_format()['Homework'].values()
         ]
 
     def hw_grade(self, hw_url_name):

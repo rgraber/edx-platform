@@ -3,34 +3,38 @@ Fragments for rendering programs.
 """
 
 import json
-
+from abc import ABC, abstractmethod
 from urllib.parse import quote
+
 from django.contrib.sites.shortcuts import get_current_site
 from django.http import Http404
 from django.template.loader import render_to_string
-from django.urls import reverse
-from django.utils.translation import get_language, to_locale, gettext_lazy as _  # lint-amnesty, pylint: disable=unused-import
+from django.utils.translation import get_language
+from django.utils.translation import gettext_lazy as _  # lint-amnesty, pylint: disable=unused-import
+from django.utils.translation import to_locale
 from lti_consumer.lti_1p1.contrib.django import lti_embed
 from web_fragments.fragment import Fragment
 
+from common.djangoapps.student.models import anonymous_id_for_user
 from common.djangoapps.student.roles import GlobalStaff
-from lms.djangoapps.commerce.utils import EcommerceService
-from lms.djangoapps.learner_dashboard.utils import FAKE_COURSE_KEY, program_tab_view_is_enabled, strip_course_id
-from openedx.core.djangoapps.catalog.constants import PathwayType
-from openedx.core.djangoapps.catalog.utils import get_pathways, get_programs
-from openedx.core.djangoapps.credentials.utils import get_credentials_records_url
-from openedx.core.djangoapps.discussions.models import ProgramDiscussionsConfiguration
+from lms.djangoapps.learner_dashboard.utils import program_tab_view_is_enabled
+from openedx.core.djangoapps.catalog.utils import get_programs
 from openedx.core.djangoapps.plugin_api.views import EdxFragmentView
-from openedx.core.djangoapps.programs.models import ProgramsApiConfig
+from openedx.core.djangoapps.programs.models import (
+    ProgramDiscussionsConfiguration,
+    ProgramLiveConfiguration,
+    ProgramsApiConfig
+)
 from openedx.core.djangoapps.programs.utils import (
-    ProgramDataExtender,
     ProgramProgressMeter,
     get_certificates,
-    get_program_marketing_url
+    get_program_marketing_url,
+    get_industry_and_credit_pathways,
+    get_program_urls,
+    get_program_and_course_data
 )
 from openedx.core.djangoapps.user_api.preferences.api import get_user_preferences
 from openedx.core.djangolib.markup import HTML
-from common.djangoapps.student.models import anonymous_id_for_user
 
 
 class ProgramsFragmentView(EdxFragmentView):
@@ -86,60 +90,39 @@ class ProgramDetailsFragmentView(EdxFragmentView):
         """View details about a specific program."""
         programs_config = kwargs.get('programs_config') or ProgramsApiConfig.current()
         user = request.user
+        site = request.site
         if not programs_config.enabled or not request.user.is_authenticated:
             raise Http404
-
-        meter = ProgramProgressMeter(request.site, user, uuid=program_uuid)
-        program_data = meter.programs[0]
-
-        if not program_data:
-            raise Http404
-
         try:
             mobile_only = json.loads(request.GET.get('mobile_only', 'false'))
         except ValueError:
             mobile_only = False
 
-        program_data = ProgramDataExtender(program_data, user, mobile_only=mobile_only).extend()
-        course_data = meter.progress(programs=[program_data], count_only=False)[0]
+        program_data, course_data = get_program_and_course_data(site, user, program_uuid, mobile_only)
+
+        if not program_data:
+            raise Http404
+
         certificate_data = get_certificates(user, program_data)
-
         program_data.pop('courses')
-        skus = program_data.get('skus')
-        ecommerce_service = EcommerceService()
 
-        # TODO: Don't have business logic of course-certificate==record-available here in LMS.
-        # Eventually, the UI should ask Credentials if there is a record available and get a URL from it.
-        # But this is here for now so that we can gate this URL behind both this business logic and
-        # a waffle flag. This feature is in active developoment.
-        program_record_url = get_credentials_records_url(program_uuid=program_uuid)
+        urls = get_program_urls(program_data)
         if not certificate_data:
-            program_record_url = None
+            urls['program_record_url'] = None
 
-        industry_pathways = []
-        credit_pathways = []
-        try:
-            for pathway_id in program_data['pathway_ids']:
-                pathway = get_pathways(request.site, pathway_id)
-                if pathway and pathway['email']:
-                    if pathway['pathway_type'] == PathwayType.CREDIT.value:
-                        credit_pathways.append(pathway)
-                    elif pathway['pathway_type'] == PathwayType.INDUSTRY.value:
-                        industry_pathways.append(pathway)
-        # if pathway caching did not complete fully (no pathway_ids)
-        except KeyError:
-            pass
+        industry_pathways, credit_pathways = get_industry_and_credit_pathways(program_data, site)
 
-        urls = {
-            'program_listing_url': reverse('program_listing_view'),
-            'track_selection_url': strip_course_id(
-                reverse('course_modes_choose', kwargs={'course_id': FAKE_COURSE_KEY})
-            ),
-            'commerce_api_url': reverse('commerce_api:v0:baskets:create'),
-            'buy_button_url': ecommerce_service.get_checkout_page_url(*skus),
-            'program_record_url': program_record_url,
-        }
         program_discussion_lti = ProgramDiscussionLTI(program_uuid, request)
+        program_live_lti = ProgramLiveLTI(program_uuid, request)
+
+        def program_tab_view_enabled() -> bool:
+            return program_tab_view_is_enabled() and (
+                industry_pathways or
+                credit_pathways or
+                program_discussion_lti.is_configured or
+                program_live_lti.is_configured
+            )
+
         context = {
             'urls': urls,
             'user_preferences': get_user_preferences(user),
@@ -148,10 +131,14 @@ class ProgramDetailsFragmentView(EdxFragmentView):
             'certificate_data': certificate_data,
             'industry_pathways': industry_pathways,
             'credit_pathways': credit_pathways,
-            'program_tab_view_enabled': program_tab_view_is_enabled(),
+            'program_tab_view_enabled': program_tab_view_enabled(),
             'discussion_fragment': {
                 'configured': program_discussion_lti.is_configured,
                 'iframe': program_discussion_lti.render_iframe()
+            },
+            'live_fragment': {
+                'configured': program_live_lti.is_configured,
+                'iframe': program_live_lti.render_iframe()
             }
         }
 
@@ -167,9 +154,9 @@ class ProgramDetailsFragmentView(EdxFragmentView):
         return _('Program Details')
 
 
-class ProgramDiscussionLTI:
+class ProgramLTI(ABC):
     """
-      Encapsulates methods for program discussion iframe rendering.
+      Encapsulates methods for program LTI iframe rendering.
     """
     DEFAULT_ROLE = 'Student'
     ADMIN_ROLE = 'Administrator'
@@ -178,7 +165,11 @@ class ProgramDiscussionLTI:
         self.program_uuid = program_uuid
         self.program = get_programs(uuid=self.program_uuid)
         self.request = request
-        self.configuration = ProgramDiscussionsConfiguration.get(self.program_uuid)
+        self.configuration = self.get_configuration()
+
+    @abstractmethod
+    def get_configuration(self):
+        return
 
     @property
     def is_configured(self):
@@ -264,7 +255,7 @@ class ProgramDiscussionLTI:
 
     def render_iframe(self) -> str:
         """
-        Returns the program discussion fragment if program discussions configuration exists for a program uuid
+        Returns the program LTI iframe if program Lti configuration exists for a program uuid
         """
         if not self.is_configured:
             return ''
@@ -285,3 +276,13 @@ class ProgramDiscussionLTI:
             )
         )
         return fragment.content
+
+
+class ProgramDiscussionLTI(ProgramLTI):
+    def get_configuration(self):
+        return ProgramDiscussionsConfiguration.get(self.program_uuid)
+
+
+class ProgramLiveLTI(ProgramLTI):
+    def get_configuration(self):
+        return ProgramLiveConfiguration.get(self.program_uuid)

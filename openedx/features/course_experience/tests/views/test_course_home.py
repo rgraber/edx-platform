@@ -77,7 +77,7 @@ TEST_COURSE_GOAL_UPDATE_FIELD_HIDDEN = 'section-goals hidden'
 COURSE_GOAL_DISMISS_OPTION = 'unsure'
 THREE_YEARS_AGO = now() - timedelta(days=(365 * 3))
 
-QUERY_COUNT_TABLE_BLACKLIST = WAFFLE_TABLES
+QUERY_COUNT_TABLE_IGNORELIST = WAFFLE_TABLES
 
 
 def course_home_url(course):
@@ -205,12 +205,13 @@ class TestCourseHomePage(CourseHomePageTestCase):  # lint-amnesty, pylint: disab
 
         # Fetch the view and verify the query counts
         # TODO: decrease query count as part of REVO-28
-        with self.assertNumQueries(65, table_blacklist=QUERY_COUNT_TABLE_BLACKLIST):
-            with check_mongo_calls(4):
+        with self.assertNumQueries(66, table_ignorelist=QUERY_COUNT_TABLE_IGNORELIST):
+            with check_mongo_calls(3):
                 url = course_home_url(self.course)
                 self.client.get(url)
 
     @mock.patch.dict('django.conf.settings.FEATURES', {'DISABLE_START_DATES': False})
+    @override_waffle_flag(COURSE_HOME_USE_LEGACY_FRONTEND, active=True)
     def test_start_date_handling(self):
         """
         Verify that the course home page handles start dates correctly.
@@ -238,6 +239,7 @@ class TestCourseHomePage(CourseHomePageTestCase):  # lint-amnesty, pylint: disab
 
 
 @ddt.ddt
+@override_waffle_flag(COURSE_HOME_USE_LEGACY_FRONTEND, active=True)
 class TestCourseHomePageAccess(CourseHomePageTestCase):
     """
     Test access to the course home page.
@@ -285,7 +287,6 @@ class TestCourseHomePageAccess(CourseHomePageTestCase):
         [True, COURSE_VISIBILITY_PUBLIC, CourseUserType.GLOBAL_STAFF, True, True],
     )
     @ddt.unpack
-    @override_waffle_flag(COURSE_HOME_USE_LEGACY_FRONTEND, active=True)
     def test_home_page(
             self, enable_unenrolled_access, course_visibility, user_type,
             expected_enroll_message, expected_course_outline,
@@ -821,6 +822,7 @@ class TestCourseHomePageAccess(CourseHomePageTestCase):
 
 
 @ddt.ddt
+@override_waffle_flag(COURSE_HOME_USE_LEGACY_FRONTEND, active=True)
 class CourseHomeFragmentViewTests(ModuleStoreTestCase):
     """
     Test Messages Displayed on the Course Home

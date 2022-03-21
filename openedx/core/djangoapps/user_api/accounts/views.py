@@ -16,7 +16,7 @@ from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model, logout
 from django.contrib.sites.models import Site
 from django.core.cache import cache
-from django.db import models, transaction
+from django.db import transaction
 from django.utils.translation import gettext as _
 from edx_ace import ace
 from edx_ace.recipient import Recipient
@@ -48,9 +48,15 @@ from common.djangoapps.student.models import (  # lint-amnesty, pylint: disable=
     get_potentially_retired_user_by_username,
     get_retired_email_by_email,
     get_retired_username_by_username,
-    is_username_retired
+    is_username_retired,
+    is_email_retired
 )
-from common.djangoapps.student.models_api import do_name_change_request
+from common.djangoapps.student.models_api import (
+    confirm_name_change,
+    do_name_change_request,
+    get_pending_name_change
+)
+from openedx.core.djangoapps.user_api.accounts import RETIRED_EMAIL_MSG
 from openedx.core.djangoapps.ace_common.template_context import get_base_template_context
 from openedx.core.djangoapps.api_admin.models import ApiAccessRequest
 from openedx.core.djangoapps.course_groups.models import UnregisteredLearnerCohortAssignments
@@ -314,6 +320,8 @@ class AccountViewSet(ViewSet):
         if usernames:
             search_usernames = usernames.strip(',').split(',')
         elif user_email:
+            if is_email_retired(user_email):
+                return Response({'error_msg': RETIRED_EMAIL_MSG}, status=status.HTTP_404_NOT_FOUND)
             user_email = user_email.strip('')
             try:
                 user = User.objects.get(email=user_email)
@@ -427,17 +435,19 @@ class AccountViewSet(ViewSet):
         return Response(account_settings)
 
 
-class NameChangeView(APIView):
+class NameChangeView(ViewSet):
     """
-    Request a profile name change. This creates a PendingNameChange to be verified later,
-    rather than updating the user's profile name directly.
+    Viewset to manage profile name change requests.
     """
     authentication_classes = (JwtAuthentication, SessionAuthentication,)
     permission_classes = (permissions.IsAuthenticated,)
 
-    def post(self, request):
+    def create(self, request):
         """
         POST /api/user/v1/accounts/name_change/
+
+        Request a profile name change. This creates a PendingNameChange to be verified later,
+        rather than updating the user's profile name directly.
 
         Example request:
             {
@@ -461,6 +471,25 @@ class NameChangeView(APIView):
                 )
 
         return Response(status=status.HTTP_400_BAD_REQUEST, data=serializer.errors)
+
+    def confirm(self, request, username):
+        """
+        POST /api/user/v1/account/name_change/{username}/confirm
+
+        Confirm a name change request for the specified user, and update their profile name.
+        """
+        if not request.user.is_staff:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+
+        user_model = get_user_model()
+        user = user_model.objects.get(username=username)
+        pending_name_change = get_pending_name_change(user)
+
+        if pending_name_change:
+            confirm_name_change(user, pending_name_change)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        else:
+            return Response(status=status.HTTP_404_NOT_FOUND)
 
 
 class AccountDeactivationView(APIView):
@@ -652,16 +681,6 @@ class AccountRetirementPartnerReportView(ViewSet):
             # Org can conceivably be blank or this bogus default value
             if org and org != 'outdated_entry':
                 orgs.add(org)
-        try:
-            # if the user has ever launched a managed Zoom xblock,
-            # we'll notify Zoom to delete their records.
-            # We use models.Value(1) to make use of the indexing on the field. MySQL does not
-            # support boolean types natively, and checking for False will cause a table scan.
-            if user.launchlog_set.filter(managed=models.Value(1)).count():
-                orgs.add('zoom')
-        except AttributeError:
-            # Zoom XBlock not installed
-            pass
         return orgs
 
     def retirement_partner_report(self, request):  # pylint: disable=unused-argument

@@ -267,6 +267,12 @@ TEST_ELASTICSEARCH_USE_SSL = os.environ.get(
 TEST_ELASTICSEARCH_HOST = os.environ.get('EDXAPP_TEST_ELASTICSEARCH_HOST', 'edx.devstack.elasticsearch710')
 TEST_ELASTICSEARCH_PORT = int(os.environ.get('EDXAPP_TEST_ELASTICSEARCH_PORT', '9200'))
 
+############################# TEMPLATE CONFIGURATION #############################
+# Adds mako template dirs for content_libraries tests
+MAKO_TEMPLATE_DIRS_BASE.append(
+    COMMON_ROOT / 'lib' / 'capa' / 'capa' / 'templates'
+)
+
 ########################## AUTHOR PERMISSION #######################
 FEATURES['ENABLE_CREATOR_GROUP'] = False
 
@@ -332,6 +338,7 @@ LOGISTRATION_API_RATELIMIT = '5/m'
 
 REGISTRATION_VALIDATION_RATELIMIT = '5/minute'
 REGISTRATION_RATELIMIT = '5/minute'
+OPTIONAL_FIELD_API_RATELIMIT = '5/m'
 
 RESET_PASSWORD_TOKEN_VALIDATE_API_RATELIMIT = '2/m'
 RESET_PASSWORD_API_RATELIMIT = '2/m'

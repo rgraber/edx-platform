@@ -18,17 +18,16 @@ from edx_toggles.toggles.testutils import override_waffle_flag
 from opaque_keys.edx.keys import CourseKey
 from web_fragments.fragment import Fragment
 from xblock.field_data import DictFieldData
+from xblock_discussion import DiscussionXBlock, loader
+from xmodule.modulestore import ModuleStoreEnum
+from xmodule.modulestore.tests.django_utils import TEST_DATA_MONGO_AMNESTY_MODULESTORE, SharedModuleStoreTestCase
+from xmodule.modulestore.tests.factories import ItemFactory, ToyCourseFactory
 
 from lms.djangoapps.course_api.blocks.tests.helpers import deserialize_usage_key
 from lms.djangoapps.courseware.module_render import get_module_for_descriptor_internal
 from lms.djangoapps.courseware.tests.helpers import XModuleRenderingTestBase
 from lms.djangoapps.discussion.toggles import ENABLE_DISCUSSIONS_MFE
 from common.djangoapps.student.tests.factories import CourseEnrollmentFactory, UserFactory
-
-from xblock_discussion import DiscussionXBlock, loader  # lint-amnesty, pylint: disable=wrong-import-order
-from xmodule.modulestore import ModuleStoreEnum  # lint-amnesty, pylint: disable=wrong-import-order
-from xmodule.modulestore.tests.django_utils import SharedModuleStoreTestCase  # lint-amnesty, pylint: disable=wrong-import-order
-from xmodule.modulestore.tests.factories import ItemFactory, ToyCourseFactory  # lint-amnesty, pylint: disable=wrong-import-order
 
 
 @ddt.ddt
@@ -261,6 +260,7 @@ class TestXBlockInCourse(SharedModuleStoreTestCase):
     """
     Test the discussion xblock as rendered in the course and course API.
     """
+    MODULESTORE = TEST_DATA_MONGO_AMNESTY_MODULESTORE
 
     @classmethod
     def setUpClass(cls):
@@ -431,12 +431,14 @@ class TestXBlockQueryLoad(SharedModuleStoreTestCase):
                 discussion_target='Target Discussion',
             ))
 
-        # 4 queries are required to do first discussion xblock render:
+        # 7 queries are required to do first discussion xblock render:
+        # * split_modulestore_django_splitmodulestorecourseindex x2
         # * waffle_utils_wafflecourseoverridemodel
+        # * waffle_utils_waffleorgoverridemodel
         # * waffle_flag
         # * django_comment_client_role
         # * lms_xblock_xblockasidesconfig
-        num_queries = 4
+        num_queries = 7
         for discussion in discussions:
             discussion_xblock = get_module_for_descriptor_internal(
                 user=user,

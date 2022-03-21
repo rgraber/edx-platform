@@ -97,7 +97,7 @@ from lms.djangoapps.courseware.permissions import (
     VIEW_COURSE_HOME,
     VIEW_COURSEWARE,
 )
-from lms.djangoapps.courseware.toggles import is_courses_default_invite_only_enabled
+from lms.djangoapps.courseware.toggles import course_is_invitation_only
 from lms.djangoapps.courseware.user_state_client import DjangoXBlockUserStateClient
 from lms.djangoapps.edxnotes.helpers import is_feature_enabled
 from lms.djangoapps.experiments.utils import get_experiment_user_metadata_context
@@ -106,7 +106,6 @@ from lms.djangoapps.instructor.enrollment import uses_shib
 from lms.djangoapps.instructor.views.api import require_global_staff
 from lms.djangoapps.survey import views as survey_views
 from lms.djangoapps.verify_student.services import IDVerificationService
-from openedx.core.djangoapps.agreements.toggles import is_integrity_signature_enabled
 from openedx.core.djangoapps.catalog.utils import get_programs, get_programs_with_type
 from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
 from openedx.core.djangoapps.credit.api import (
@@ -733,7 +732,7 @@ class CourseTabView(EdxFragmentView):
     @staticmethod
     def course_open_for_learner_enrollment(course):
         return (course_open_for_self_enrollment(course.id)
-                and not course.invitation_only
+                and not course_is_invitation_only(course)
                 and not CourseMode.is_masters_only(course.id))
 
     @staticmethod
@@ -976,7 +975,7 @@ def course_about(request, course_id):
 
         # Used to provide context to message to student if enrollment not allowed
         can_enroll = bool(request.user.has_perm(ENROLL_IN_COURSE, course))
-        invitation_only = is_courses_default_invite_only_enabled() or course.invitation_only
+        invitation_only = course_is_invitation_only(course)
         is_course_full = CourseEnrollment.objects.is_course_full(course)
 
         # Register button should be disabled if one of the following is true:
@@ -1254,8 +1253,8 @@ def _downloadable_certificate_message(course, cert_downloadable_status):  # lint
     return _downloadable_cert_data(download_url=cert_downloadable_status['download_url'])
 
 
-def _missing_required_verification(student, enrollment_mode, course_key):
-    return not is_integrity_signature_enabled(course_key) and (
+def _missing_required_verification(student, enrollment_mode):
+    return not settings.FEATURES.get('ENABLE_INTEGRITY_SIGNATURE') and (
         enrollment_mode in CourseMode.VERIFIED_MODES and not IDVerificationService.user_is_verified(student)
     )
 
@@ -1278,7 +1277,7 @@ def _certificate_message(student, course, enrollment_mode):  # lint-amnesty, pyl
     if cert_downloadable_status['is_downloadable']:
         return _downloadable_certificate_message(course, cert_downloadable_status)
 
-    if _missing_required_verification(student, enrollment_mode, course.id):
+    if _missing_required_verification(student, enrollment_mode):
         return UNVERIFIED_CERT_DATA
 
     return REQUESTING_CERT_DATA
@@ -1672,7 +1671,7 @@ def enclosing_sequence_for_gating_checks(block):
     all. LabXchange uses learning pathways, but even content inside courses like
     `static_tab`, `book`, and `about` live outside the sequence hierarchy.
     """
-    seq_tags = ['sequential', 'problemset', 'videosequence']
+    seq_tags = ['sequential']
 
     # If it's being called on a Sequence itself, then don't bother crawling the
     # ancestor tree, because all the sequence metadata we need for gating checks

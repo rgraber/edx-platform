@@ -866,7 +866,7 @@ FEATURES = {
     # .. toggle_tickets: 'https://github.com/edx/edx-platform/pull/24908'
     # .. toggle_warnings: Also set settings.AUTHN_MICROFRONTEND_URL for rollout. This temporary feature
     #   toggle does not have a target removal date.
-    'ENABLE_AUTHN_MICROFRONTEND': False,
+    'ENABLE_AUTHN_MICROFRONTEND': os.environ.get("EDXAPP_ENABLE_AUTHN_MFE", False),
 
     ### ORA Feature Flags ###
     # .. toggle_name: FEATURES['ENABLE_ORA_ALL_FILE_URLS']
@@ -948,6 +948,18 @@ FEATURES = {
     # .. toggle_target_removal_date: 2021-10-01
     # .. toggle_tickets: 'https://openedx.atlassian.net/browse/MICROBA-1405'
     'ENABLE_V2_CERT_DISPLAY_SETTINGS': False,
+
+    # .. toggle_name: FEATURES['ENABLE_INTEGRITY_SIGNATURE']
+    # .. toggle_implementation: DjangoSetting
+    # .. toggle_default: False
+    # .. toggle_description: Whether to replace ID verification course/certificate requirement
+    # with an in-course Honor Code agreement
+    # (https://github.com/edx/edx-name-affirmation)
+    # .. toggle_use_cases: open_edx
+    # .. toggle_creation_date: 2022-02-15
+    # .. toggle_target_removal_date: None
+    # .. toggle_tickets: 'https://openedx.atlassian.net/browse/MST-1348'
+    'ENABLE_INTEGRITY_SIGNATURE': False,
 }
 
 # Specifies extra XBlock fields that should available when requested via the Course Blocks API
@@ -1848,7 +1860,9 @@ STATICI18N_OUTPUT_DIR = "js/i18n"
 
 # Localization strings (e.g. django.po) are under these directories
 def _make_locale_paths(settings):  # pylint: disable=missing-function-docstring
-    locale_paths = [settings.REPO_ROOT + '/conf/locale']  # edx-platform/conf/locale/
+    locale_paths = list(settings.PREPEND_LOCALE_PATHS)
+    locale_paths += [settings.REPO_ROOT + '/conf/locale']  # edx-platform/conf/locale/
+
     if settings.ENABLE_COMPREHENSIVE_THEMING:
         # Add locale paths to settings for comprehensive theming.
         for locale_path in settings.COMPREHENSIVE_THEME_LOCALE_PATHS:
@@ -2006,10 +2020,10 @@ FOOTER_OPENEDX_URL = "https://open.edx.org"
 # We use logo images served from files.edx.org so we can (roughly) track
 # how many OpenEdX installations are running.
 # Site operators can choose from these logo options:
-# * https://files.edx.org/openedx-logos/open-edx-logo-tag.png
-# * https://files.edx.org/openedx-logos/open-edx-logo-tag-light.png"
-# * https://files.edx.org/openedx-logos/open-edx-logo-tag-dark.png
-FOOTER_OPENEDX_LOGO_IMAGE = "https://files.edx.org/openedx-logos/open-edx-logo-tag.png"
+# * https://logos.openedx.org/open-edx-logo-tag.png
+# * https://logos.openedx.org/open-edx-logo-tag-light.png"
+# * https://logos.openedx.org/open-edx-logo-tag-dark.png
+FOOTER_OPENEDX_LOGO_IMAGE = "https://logos.openedx.org/open-edx-logo-tag.png"
 
 # This is just a placeholder image.
 # Site operators can customize this with their organization's image.
@@ -2043,26 +2057,22 @@ CREDIT_NOTIFICATION_CACHE_TIMEOUT = 5 * 60 * 60
 
 MIDDLEWARE = [
     'openedx.core.lib.x_forwarded_for.middleware.XForwardedForMiddleware',
-
     'crum.CurrentRequestUserMiddleware',
 
-    'edx_django_utils.monitoring.DeploymentMonitoringMiddleware',
-    # A newer and safer request cache.
+    # Resets the request cache.
     'edx_django_utils.cache.middleware.RequestCacheMiddleware',
 
-    # Generate code ownership attributes. Keep this immediately after RequestCacheMiddleware.
+    # Various monitoring middleware
+    'edx_django_utils.monitoring.CachedCustomMonitoringMiddleware',
     'edx_django_utils.monitoring.CodeOwnerMonitoringMiddleware',
+    'edx_django_utils.monitoring.CookieMonitoringMiddleware',
+    'edx_django_utils.monitoring.DeploymentMonitoringMiddleware',
 
-    # After cookie monitoring, but before anything else that looks at
-    # cookies, especially the session middleware
+    # Before anything that looks at cookies, especially the session middleware
     'openedx.core.djangoapps.cookie_metadata.middleware.CookieNameChange',
 
-    # Monitoring and logging middleware
+    # Monitoring and logging for expected and ignored errors
     'openedx.core.lib.request_utils.ExpectedErrorMiddleware',
-    'edx_django_utils.monitoring.CachedCustomMonitoringMiddleware',
-
-    # Cookie monitoring
-    'openedx.core.lib.request_utils.CookieMonitoringMiddleware',
 
     'lms.djangoapps.mobile_api.middleware.AppVersionUpgrade',
     'openedx.core.djangoapps.header_control.middleware.HeaderControlMiddleware',
@@ -3197,7 +3207,7 @@ INSTALLED_APPS = [
     'edx_ace',
 
     # For save for later
-    'lms.djangoapps.save_for_later'
+    'lms.djangoapps.save_for_later',
 ]
 
 ######################### CSRF #########################################
@@ -3247,6 +3257,7 @@ REGISTRATION_RATELIMIT = '60/7d'
 
 SWAGGER_SETTINGS = {
     'DEFAULT_INFO': 'openedx.core.apidocs.api_info',
+    'DEEP_LINKING': True,
 }
 
 # How long to cache OpenAPI schemas and UI, in seconds.
@@ -3491,7 +3502,7 @@ REGISTRATION_FIELD_ORDER = [
     "year_of_birth",
     "level_of_education",
     "specialty",
-    "profession"
+    "profession",
     "company",
     "title",
     "mailing_address",
@@ -3894,6 +3905,7 @@ OPTIONAL_APPS = [
     ('openassessment', 'openedx.core.djangoapps.content.course_overviews.apps.CourseOverviewsConfig'),
     ('openassessment.assessment', 'openedx.core.djangoapps.content.course_overviews.apps.CourseOverviewsConfig'),
     ('openassessment.fileupload', 'openedx.core.djangoapps.content.course_overviews.apps.CourseOverviewsConfig'),
+    ('openassessment.staffgrader', 'openedx.core.djangoapps.content.course_overviews.apps.CourseOverviewsConfig'),
     ('openassessment.workflow', 'openedx.core.djangoapps.content.course_overviews.apps.CourseOverviewsConfig'),
     ('openassessment.xblock', 'openedx.core.djangoapps.content.course_overviews.apps.CourseOverviewsConfig'),
 
@@ -4004,6 +4016,21 @@ SEARCH_RESULT_PROCESSOR = "lms.lib.courseware_search.lms_result_processor.LmsSea
 SEARCH_FILTER_GENERATOR = "lms.lib.courseware_search.lms_filter_generator.LmsSearchFilterGenerator"
 # Override to skip enrollment start date filtering in course search
 SEARCH_SKIP_ENROLLMENT_START_DATE_FILTERING = False
+# .. toggle_name: SEARCH_SKIP_INVITATION_ONLY_FILTERING
+# .. toggle_implementation: DjangoSetting
+# .. toggle_default: True
+# .. toggle_description: If enabled, invitation-only courses will appear in search results.
+# .. toggle_use_cases: open_edx
+# .. toggle_creation_date: 2021-08-27
+SEARCH_SKIP_INVITATION_ONLY_FILTERING = True
+# .. toggle_name: SEARCH_SKIP_SHOW_IN_CATALOG_FILTERING
+# .. toggle_implementation: DjangoSetting
+# .. toggle_default: True
+# .. toggle_description: If enabled, courses with a catalog_visibility set to "none" will still
+#    appear in search results.
+# .. toggle_use_cases: open_edx
+# .. toggle_creation_date: 2021-08-27
+SEARCH_SKIP_SHOW_IN_CATALOG_FILTERING = True
 
 # The configuration visibility of account fields.
 ACCOUNT_VISIBILITY_CONFIGURATION = {
@@ -4345,6 +4372,13 @@ COMPREHENSIVE_THEME_DIRS = []
 #   "COMPREHENSIVE_THEME_LOCALE_PATHS" : ["/edx/src/edx-themes/conf/locale"].
 COMPREHENSIVE_THEME_LOCALE_PATHS = []
 
+
+# .. setting_name: PREPEND_LOCALE_PATHS
+# .. setting_default: []
+# .. setting_description: A list of the paths to locale directories to load first e.g.
+#   "PREPEND_LOCALE_PATHS" : ["/edx/my-locales/"].
+PREPEND_LOCALE_PATHS = []
+
 # .. setting_name: DEFAULT_SITE_THEME
 # .. setting_default: None
 # .. setting_description: Theme to use when no site or site theme is defined, for example
@@ -4541,7 +4575,19 @@ COURSE_ENROLLMENT_MODES = {
         "slug": "executive-educations",
         "display_name": _("Executive Education"),
         "min_price": 1
-    }
+    },
+    "unpaid-executive-education": {
+        "id": 9,
+        "slug": "unpaid-executive-education",
+        "display_name": _("Unpaid Executive Education"),
+        "min_price": 0
+    },
+    "paid-executive-education": {
+        "id": 10,
+        "slug": "paid-executive-education",
+        "display_name": _("Paid Executive Education"),
+        "min_price": 1
+    },
 }
 
 CONTENT_TYPE_GATE_GROUP_IDS = {
@@ -4594,6 +4640,7 @@ LOGISTRATION_API_RATELIMIT = '20/m'
 LOGIN_AND_REGISTER_FORM_RATELIMIT = '100/5m'
 RESET_PASSWORD_TOKEN_VALIDATE_API_RATELIMIT = '30/7d'
 RESET_PASSWORD_API_RATELIMIT = '30/7d'
+OPTIONAL_FIELD_API_RATELIMIT = '10/h'
 
 ##### PASSWORD RESET RATE LIMIT SETTINGS #####
 PASSWORD_RESET_IP_RATE = '1/m'
@@ -4730,11 +4777,22 @@ PROGRAM_CONSOLE_MICROFRONTEND_URL = None
 # .. setting_default: None
 # .. setting_description: Base URL of the micro-frontend-based courseware page.
 LEARNING_MICROFRONTEND_URL = None
-# .. setting_name: DISCUSSIONS_MICROFRONTEND_URL
+# .. setting_name: ORA_GRADING_MICROFRONTEND_URL
 # .. setting_default: None
+# .. setting_description: Base URL of the micro-frontend-based openassessment grading page.
+#     This is will be show in the open response tab list data.
+# .. setting_warning: Also set site's openresponseassessment.enhanced_staff_grader
+#     waffle flag.
+ORA_GRADING_MICROFRONTEND_URL = None
+# .. setting_name: DISCUSSIONS_MICROFRONTEND_URL
 # .. setting_description: Base URL of the micro-frontend-based discussions page.
+# .. setting_default: None
 # .. setting_warning: Also set site's courseware.discussions_mfe waffle flag.
 DISCUSSIONS_MICROFRONTEND_URL = None
+# .. setting_name: DISCUSSIONS_MFE_FEEDBACK_URL = None
+# .. setting_default: None
+# .. setting_description: Base URL of the discussions micro-frontend google form based feedback.
+DISCUSSIONS_MFE_FEEDBACK_URL = None
 # .. toggle_name: ENABLE_AUTHN_RESET_PASSWORD_HIBP_POLICY
 # .. toggle_implementation: DjangoSetting
 # .. toggle_default: False
@@ -4908,3 +4966,24 @@ CUSTOM_PAGES_HELP_URL = "https://edx.readthedocs.io/projects/open-edx-building-a
 # The expected value is an Integer representing the cutoff point (in months) for inclusion to the message. Example:
 # a value of `3` would include learners who have logged in within the past 3 months.
 BULK_COURSE_EMAIL_LAST_LOGIN_ELIGIBILITY_PERIOD = None
+
+################ Settings for the Discussion Service #########
+# Provide a list of reason codes for moderators editing posts and
+# comments, as a mapping from the internal reason code representation,
+# to an internationalizable label to be shown to moderators in the form UI.
+DISCUSSION_MODERATION_EDIT_REASON_CODES = {
+    "grammar-spelling": _("Has grammar / spelling issues"),
+    "needs-clarity": _("Content needs clarity"),
+    "academic-integrity": _("Has academic integrity concern"),
+    "inappropriate-language": _("Has inappropriate language"),
+    "contains-pii": _("Contains personally identifiable information"),
+}
+# Provide a list of reason codes for moderators to close posts, as a mapping
+# from the internal reason code representation, to  an internationalizable label
+#  to be shown to moderators in the form UI.
+DISCUSSION_MODERATION_CLOSE_REASON_CODES = {
+    "academic-integrity": _("Post violates honour code or academic integrity"),
+    "read-only": _("Post should be read-only"),
+    "duplicate": _("Post is a duplicate"),
+    "off-topic": _("Post is off-topic"),
+}

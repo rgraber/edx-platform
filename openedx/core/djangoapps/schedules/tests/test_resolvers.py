@@ -206,6 +206,8 @@ class TestCourseNextSectionUpdateResolver(SchedulesResolverTestMixin, ModuleStor
     """
     Tests the TestCourseNextSectionUpdateResolver.
     """
+    ENABLED_SIGNALS = ['course_published']
+
     def setUp(self):
         super().setUp()
         self.today = datetime.datetime.utcnow()
@@ -247,7 +249,7 @@ class TestCourseNextSectionUpdateResolver(SchedulesResolverTestMixin, ModuleStor
     def test_schedule_context(self):
         resolver = self.create_resolver()
         # using this to make sure the select_related stays intact
-        with self.assertNumQueries(36):
+        with self.assertNumQueries(41):
             sc = resolver.get_schedules()
             schedules = list(sc)
 

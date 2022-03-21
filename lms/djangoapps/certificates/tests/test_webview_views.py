@@ -2,6 +2,7 @@
 
 
 import datetime
+from unittest import skipUnless
 from unittest.mock import patch
 from urllib.parse import urlencode
 from uuid import uuid4
@@ -11,8 +12,6 @@ from django.conf import settings
 from django.test.client import Client, RequestFactory
 from django.test.utils import override_settings
 from django.urls import reverse
-from edx_name_affirmation.api import create_verified_name, create_verified_name_config
-from edx_name_affirmation.statuses import VerifiedNameStatus
 from edx_toggles.toggles.testutils import override_waffle_switch
 from organizations import api as organizations_api
 
@@ -51,6 +50,7 @@ from openedx.core.djangoapps.site_configuration.tests.test_util import (
 from openedx.core.djangolib.js_utils import js_escaped_string
 from openedx.core.djangolib.testing.utils import CacheIsolationTestCase
 from openedx.core.lib.tests.assertions.events import assert_event_matches
+from openedx.features.name_affirmation_api.utils import get_name_affirmation_service
 from xmodule.data import CertificatesDisplayBehaviors  # lint-amnesty, pylint: disable=wrong-import-order
 from xmodule.modulestore.tests.django_utils import ModuleStoreTestCase  # lint-amnesty, pylint: disable=wrong-import-order
 from xmodule.modulestore.tests.factories import CourseFactory  # lint-amnesty, pylint: disable=wrong-import-order
@@ -65,6 +65,8 @@ FEATURES_WITH_CERTS_DISABLED['CERTIFICATES_HTML_VIEW'] = False
 
 FEATURES_WITH_CUSTOM_CERTS_ENABLED = FEATURES_WITH_CERTS_ENABLED.copy()
 FEATURES_WITH_CUSTOM_CERTS_ENABLED['CUSTOM_CERTIFICATE_TEMPLATES_ENABLED'] = True
+
+name_affirmation_service = get_name_affirmation_service()
 
 
 class CommonCertificatesTestCase(ModuleStoreTestCase):
@@ -148,7 +150,7 @@ class CommonCertificatesTestCase(ModuleStoreTestCase):
         self.course.certificates = {'certificates': certificates}
         self.course.cert_html_view_enabled = True
         self.course.save()
-        self.store.update_item(self.course, self.user.id)
+        self.update_course(self.course, self.user.id)
 
     def _create_custom_template(self, org_id=None, mode=None, course_key=None, language=None):
         """
@@ -531,7 +533,7 @@ class CertificatesViewsTests(CommonCertificatesTestCase, CacheIsolationTestCase)
         }
 
         self.course.save()
-        self.store.update_item(self.course, self.user.id)
+        self.update_course(self.course, self.user.id)
 
         test_url = get_certificate_url(
             user_id=self.user.id,
@@ -715,7 +717,7 @@ class CertificatesViewsTests(CommonCertificatesTestCase, CacheIsolationTestCase)
         self.course.cert_html_view_enabled = True
         self.course.certificate_available_date = datetime.datetime.today() + datetime.timedelta(days=1)
         self.course.save()
-        self.store.update_item(self.course, self.user.id)
+        self.update_course(self.course, self.user.id)
 
         test_url = get_certificate_url(
             user_id=self.user.id,
@@ -759,7 +761,7 @@ class CertificatesViewsTests(CommonCertificatesTestCase, CacheIsolationTestCase)
         self.course.certificates = {'certificates': test_certificates}
         self.course.cert_html_view_enabled = True
         self.course.save()
-        self.store.update_item(self.course, self.user.id)
+        self.update_course(self.course, self.user.id)
         test_url = get_certificate_url(
             user_id=self.user.id,
             course_id=str(self.course.id),
@@ -787,7 +789,7 @@ class CertificatesViewsTests(CommonCertificatesTestCase, CacheIsolationTestCase)
 
         self.course.display_coursenumber = "overridden_number"
         self.course.display_organization = "overridden_org"
-        self.store.update_item(self.course, self.user.id)
+        self.update_course(self.course, self.user.id)
 
         response = self.client.get(test_url)
         self.assertContains(response, 'overridden_number')
@@ -807,7 +809,7 @@ class CertificatesViewsTests(CommonCertificatesTestCase, CacheIsolationTestCase)
         self.course.certificates = {'certificates': test_certificates}
         self.course.cert_html_view_enabled = True
         self.course.save()
-        self.store.update_item(self.course, self.user.id)
+        self.update_course(self.course, self.user.id)
 
         test_url = get_certificate_url(
             user_id=self.user.id,
@@ -848,7 +850,7 @@ class CertificatesViewsTests(CommonCertificatesTestCase, CacheIsolationTestCase)
         self.course.certificates = {'certificates': test_certificates}
         self.course.cert_html_view_enabled = True
         self.course.save()
-        self.store.update_item(self.course, self.user.id)
+        self.update_course(self.course, self.user.id)
 
         test_url = get_certificate_url(
             user_id=self.user.id,
@@ -975,7 +977,7 @@ class CertificatesViewsTests(CommonCertificatesTestCase, CacheIsolationTestCase)
         self.course.self_paced = self_paced
         today = datetime.datetime.utcnow()
         self.course.certificate_available_date = today + datetime.timedelta(cert_avail_delta)
-        self.store.update_item(self.course, self.user.id)
+        self.update_course(self.course, self.user.id)
         self._add_course_certificates(count=1, signatory_count=1, is_active=True)
         test_url = get_certificate_url(
             user_id=self.user.id,
@@ -1018,7 +1020,7 @@ class CertificatesViewsTests(CommonCertificatesTestCase, CacheIsolationTestCase)
             self._add_certificate_date_override()
         today = datetime.datetime.utcnow()
         self.course.certificate_available_date = today + datetime.timedelta(-2)
-        self.store.update_item(self.course, self.user.id)
+        self.update_course(self.course, self.user.id)
         self._add_course_certificates(count=1, signatory_count=1, is_active=True)
         test_url = get_certificate_url(
             user_id=self.user.id,
@@ -1048,7 +1050,7 @@ class CertificatesViewsTests(CommonCertificatesTestCase, CacheIsolationTestCase)
     def test_render_html_view_invalid_certificate_configuration(self):
         self.course.cert_html_view_enabled = True
         self.course.save()
-        self.store.update_item(self.course, self.user.id)
+        self.update_course(self.course, self.user.id)
 
         test_url = get_certificate_url(
             user_id=self.user.id,
@@ -1613,10 +1615,11 @@ class CertificatesViewsTests(CommonCertificatesTestCase, CacheIsolationTestCase)
                 )
             )
 
+    @skipUnless(name_affirmation_service is not None, 'Requires Name Affirmation')
     @override_settings(FEATURES=FEATURES_WITH_CERTS_ENABLED)
-    @ddt.data((True, VerifiedNameStatus.APPROVED),
-              (True, VerifiedNameStatus.DENIED),
-              (False, VerifiedNameStatus.PENDING))
+    @ddt.data((True, 'approved'),
+              (True, 'denied'),
+              (False, 'pending'))
     @ddt.unpack
     def test_certificate_view_verified_name(self, should_use_verified_name_for_certs, status):
         """
@@ -1624,8 +1627,16 @@ class CertificatesViewsTests(CommonCertificatesTestCase, CacheIsolationTestCase)
         their verified name will appear on the certificate rather than their profile name.
         """
         verified_name = 'Jonathan Doe'
-        create_verified_name(self.user, verified_name, self.user.profile.name, status=status)
-        create_verified_name_config(self.user, use_verified_name_for_certs=should_use_verified_name_for_certs)
+        name_affirmation_service.create_verified_name(
+            self.user,
+            verified_name,
+            self.user.profile.name,
+            status=status
+        )
+        name_affirmation_service.create_verified_name_config(
+            self.user,
+            use_verified_name_for_certs=should_use_verified_name_for_certs
+        )
 
         self._add_course_certificates(count=1, signatory_count=1)
         test_url = get_certificate_url(
@@ -1635,7 +1646,7 @@ class CertificatesViewsTests(CommonCertificatesTestCase, CacheIsolationTestCase)
         )
 
         response = self.client.get(test_url, HTTP_HOST='test.localhost')
-        if should_use_verified_name_for_certs and status == VerifiedNameStatus.APPROVED:
+        if should_use_verified_name_for_certs and status == 'approved':
             self.assertContains(response, verified_name)
             self.assertNotContains(response, self.user.profile.name)
         else:
@@ -1643,34 +1654,33 @@ class CertificatesViewsTests(CommonCertificatesTestCase, CacheIsolationTestCase)
             self.assertNotContains(response, verified_name)
 
     @override_settings(FEATURES=FEATURES_WITH_CUSTOM_CERTS_ENABLED)
-    @patch('lms.djangoapps.certificates.views.webview.is_integrity_signature_enabled')
     @ddt.data(
         True,
         False
     )
-    def test_verified_certificate_description(self, integrity_signature_enabled, mock_integrity_signature):
+    def test_verified_certificate_description(self, enable_integrity_signature):
         """
         Test that for a verified cert, the correct language is used when the integrity signature feature is enabled.
         """
-        mock_integrity_signature.return_value = integrity_signature_enabled
-        self._add_course_certificates(count=1, signatory_count=2, is_active=True)
-        self._create_custom_template_with_verified_description()
-        self.cert.mode = 'verified'
-        self.cert.save()
-        test_url = get_certificate_url(
-            user_id=self.user.id,
-            course_id=str(self.course.id),
-            uuid=self.cert.verify_uuid
-        )
+        with patch.dict(settings.FEATURES, ENABLE_INTEGRITY_SIGNATURE=enable_integrity_signature):
+            self._add_course_certificates(count=1, signatory_count=2, is_active=True)
+            self._create_custom_template_with_verified_description()
+            self.cert.mode = 'verified'
+            self.cert.save()
+            test_url = get_certificate_url(
+                user_id=self.user.id,
+                course_id=str(self.course.id),
+                uuid=self.cert.verify_uuid
+            )
 
-        response = self.client.get(test_url)
-        assert response.status_code == 200
-        if not integrity_signature_enabled:
-            self.assertContains(response, 'identity of the learner has been checked and is valid')
-            self.assertNotContains(response, 'Integrity signature enabled')
-        else:
-            self.assertNotContains(response, 'identity of the learner has been checked and is valid')
-            self.assertContains(response, 'Integrity signature enabled')
+            response = self.client.get(test_url)
+            assert response.status_code == 200
+            if not enable_integrity_signature:
+                self.assertContains(response, 'identity of the learner has been checked and is valid')
+                self.assertNotContains(response, 'Integrity signature enabled')
+            else:
+                self.assertNotContains(response, 'identity of the learner has been checked and is valid')
+                self.assertContains(response, 'Integrity signature enabled')
 
 
 class CertificateEventTests(CommonCertificatesTestCase, EventTrackingTestCase):
@@ -1744,12 +1754,12 @@ class CertificateEventTests(CommonCertificatesTestCase, EventTrackingTestCase):
             {
                 'name': 'edx.badge.assertion.evidence_visited',
                 'data': {
-                    'course_id': 'testorg/run1/refundable_course',
+                    'course_id': 'course-v1:testorg+run1+refundable_course',
                     'assertion_id': assertion.id,
                     'badge_generator': 'DummyBackend',
                     'badge_name': 'refundable course',
                     'issuing_component': '',
-                    'badge_slug': 'testorgrun1refundable_course_honor_432f164',
+                    'badge_slug': 'course-v1testorgrun1refundable_course_honor_927f3ad',
                     'assertion_json_url': 'https://www.example.com/assertion.json',
                     'assertion_image_url': 'https://www.example.com/image.png',
                     'user_id': self.user.id,

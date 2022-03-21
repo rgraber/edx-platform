@@ -27,6 +27,21 @@ from xblock.fields import Scope, ScopeIds, String
 from xblock.runtime import DictKeyValueStore, KvsFieldData
 from xblock.test.tools import TestRuntime
 from xblock.validation import ValidationMessage
+from xmodule.capa_module import ProblemBlock
+from xmodule.course_module import DEFAULT_START_DATE
+from xmodule.modulestore import ModuleStoreEnum
+from xmodule.modulestore.django import modulestore
+from xmodule.modulestore.exceptions import ItemNotFoundError
+from xmodule.modulestore.tests.django_utils import TEST_DATA_SPLIT_MODULESTORE, ModuleStoreTestCase
+from xmodule.modulestore.tests.factories import CourseFactory, ItemFactory, LibraryFactory, check_mongo_calls
+from xmodule.partitions.partitions import (
+    ENROLLMENT_TRACK_PARTITION_ID,
+    MINIMUM_STATIC_PARTITION_ID,
+    Group,
+    UserPartition
+)
+from xmodule.partitions.tests.test_partitions import MockPartitionService
+from xmodule.x_module import STUDENT_VIEW, STUDIO_VIEW
 
 from cms.djangoapps.contentstore.tests.utils import CourseTestCase
 from cms.djangoapps.contentstore.utils import reverse_course_url, reverse_usage_url
@@ -40,21 +55,6 @@ from common.djangoapps.xblock_django.models import (
 from common.djangoapps.xblock_django.user_service import DjangoXBlockUserService
 from lms.djangoapps.lms_xblock.mixin import NONSENSICAL_ACCESS_RESTRICTION
 from openedx.core.djangoapps.discussions.models import DiscussionsConfiguration
-from xmodule.capa_module import ProblemBlock  # lint-amnesty, pylint: disable=wrong-import-order
-from xmodule.course_module import DEFAULT_START_DATE  # lint-amnesty, pylint: disable=wrong-import-order
-from xmodule.modulestore import ModuleStoreEnum  # lint-amnesty, pylint: disable=wrong-import-order
-from xmodule.modulestore.django import modulestore  # lint-amnesty, pylint: disable=wrong-import-order
-from xmodule.modulestore.exceptions import ItemNotFoundError  # lint-amnesty, pylint: disable=wrong-import-order
-from xmodule.modulestore.tests.django_utils import TEST_DATA_SPLIT_MODULESTORE, ModuleStoreTestCase  # lint-amnesty, pylint: disable=wrong-import-order
-from xmodule.modulestore.tests.factories import CourseFactory, ItemFactory, LibraryFactory, check_mongo_calls  # lint-amnesty, pylint: disable=wrong-import-order
-from xmodule.partitions.partitions import (  # lint-amnesty, pylint: disable=wrong-import-order
-    ENROLLMENT_TRACK_PARTITION_ID,
-    MINIMUM_STATIC_PARTITION_ID,
-    Group,
-    UserPartition
-)
-from xmodule.partitions.tests.test_partitions import MockPartitionService  # lint-amnesty, pylint: disable=wrong-import-order
-from xmodule.x_module import STUDENT_VIEW, STUDIO_VIEW  # lint-amnesty, pylint: disable=wrong-import-order
 
 from ..component import component_handler, get_component_templates
 from ..item import (
@@ -1334,7 +1334,6 @@ class TestDuplicateItemWithAsides(ItemTest, DuplicateHelper):
     """
     Test the duplicate method for blocks with asides.
     """
-
     MODULESTORE = TEST_DATA_SPLIT_MODULESTORE
 
     def setUp(self):
@@ -1899,8 +1898,6 @@ class TestEditItemSplitMongo(TestEditItemSetup):
     """
     Tests for EditItem running on top of the SplitMongoModuleStore.
     """
-    MODULESTORE = TEST_DATA_SPLIT_MODULESTORE
-
     def test_editing_view_wrappers(self):
         """
         Verify that the editing view only generates a single wrapper, no matter how many times it's loaded
@@ -2563,7 +2560,7 @@ class TestXBlockInfo(ItemTest):
         self.validate_course_xblock_info(json_response, course_outline=True)
 
     @ddt.data(
-        (ModuleStoreEnum.Type.split, 4, 4),
+        (ModuleStoreEnum.Type.split, 3, 3),
         (ModuleStoreEnum.Type.mongo, 5, 7),
     )
     @ddt.unpack
@@ -2846,6 +2843,7 @@ class TestXBlockInfo(ItemTest):
 
 
 @patch.dict('django.conf.settings.FEATURES', {'ENABLE_SPECIAL_EXAMS': True})
+@ddt.ddt
 class TestSpecialExamXBlockInfo(ItemTest):
     """
     Unit tests for XBlock outline handling, specific to special exam XBlocks.
@@ -2857,7 +2855,7 @@ class TestSpecialExamXBlockInfo(ItemTest):
         item_module, 'does_backend_support_onboarding', return_value=True
     )
     patch_get_exam_by_content_id_success = patch.object(
-        item_module, 'get_exam_by_content_id'
+        item_module, 'get_exam_by_content_id', return_value={'external_id': 'test_external_id'}
     )
     patch_get_exam_by_content_id_not_found = patch.object(
         item_module, 'get_exam_by_content_id', side_effect=ProctoredExamNotFoundException
@@ -2911,20 +2909,26 @@ class TestSpecialExamXBlockInfo(ItemTest):
         )
         # exam proctoring should be enabled and time limited.
         assert xblock_info['is_proctored_exam'] is True
-        assert xblock_info['was_ever_special_exam'] is True
+        assert xblock_info['was_exam_ever_linked_with_external'] is True
         assert xblock_info['is_time_limited'] is True
         assert xblock_info['default_time_limit_minutes'] == 100
         assert xblock_info['proctoring_exam_configuration_link'] == 'test_url'
         assert xblock_info['supports_onboarding'] is True
         assert xblock_info['is_onboarding_exam'] is False
         mock_get_exam_configuration_dashboard_url.assert_called_with(self.course.id, xblock_info['id'])
-        assert mock_get_exam_by_content_id.call_count == 0
 
     @patch_get_exam_configuration_dashboard_url
     @patch_does_backend_support_onboarding
     @patch_get_exam_by_content_id_success
-    def test_xblock_was_ever_special_exam(
+    @ddt.data(
+        ('test_external_id', True),
+        (None, False),
+    )
+    @ddt.unpack
+    def test_xblock_was_ever_proctortrack_proctored_exam(
             self,
+            external_id,
+            expected_value,
             mock_get_exam_by_content_id,
             _mock_does_backend_support_onboarding_patch,
             _mock_get_exam_configuration_dashboard_url,
@@ -2938,19 +2942,20 @@ class TestSpecialExamXBlockInfo(ItemTest):
             is_time_limited=False,
             is_onboarding_exam=False,
         )
+        mock_get_exam_by_content_id.return_value = {'external_id': external_id}
         sequential = modulestore().get_item(sequential.location)
         xblock_info = create_xblock_info(
             sequential,
             include_child_info=True,
             include_children_predicate=ALWAYS,
         )
-        assert xblock_info['was_ever_special_exam'] is True
+        assert xblock_info['was_exam_ever_linked_with_external'] is expected_value
         assert mock_get_exam_by_content_id.call_count == 1
 
     @patch_get_exam_configuration_dashboard_url
     @patch_does_backend_support_onboarding
     @patch_get_exam_by_content_id_not_found
-    def test_xblock_was_never_proctored_exam(
+    def test_xblock_was_never_proctortrack_proctored_exam(
             self,
             mock_get_exam_by_content_id,
             _mock_does_backend_support_onboarding_patch,
@@ -2971,7 +2976,7 @@ class TestSpecialExamXBlockInfo(ItemTest):
             include_child_info=True,
             include_children_predicate=ALWAYS,
         )
-        assert xblock_info['was_ever_special_exam'] is False
+        assert xblock_info['was_exam_ever_linked_with_external'] is False
         assert mock_get_exam_by_content_id.call_count == 1
 
 

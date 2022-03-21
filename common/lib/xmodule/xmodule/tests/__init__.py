@@ -28,14 +28,17 @@ from xblock.fields import Reference, ReferenceList, ReferenceValueDict, ScopeIds
 
 from capa.xqueue_interface import XQueueService
 from xmodule.assetstore import AssetMetadata
+from xmodule.contentstore.django import contentstore
 from xmodule.error_module import ErrorBlock
 from xmodule.mako_module import MakoDescriptorSystem
 from xmodule.modulestore import ModuleStoreEnum
 from xmodule.modulestore.draft_and_published import ModuleStoreDraftAndPublished
 from xmodule.modulestore.inheritance import InheritanceMixin
 from xmodule.modulestore.xml import CourseLocationManager
-from xmodule.tests.helpers import mock_render_template, StubMakoService, StubUserService
-from xmodule.x_module import ModuleSystem, XModuleDescriptor, XModuleMixin
+from xmodule.tests.helpers import StubReplaceURLService, mock_render_template, StubMakoService, StubUserService
+from xmodule.util.sandboxing import SandboxService
+from xmodule.x_module import DoNothingCache, ModuleSystem, XModuleDescriptor, XModuleMixin
+from openedx.core.lib.cache_utils import CacheService
 
 
 MODULE_DIR = path(__file__).dirname()
@@ -49,10 +52,16 @@ class TestModuleSystem(ModuleSystem):  # pylint: disable=abstract-method
     ModuleSystem for testing
     """
     def __init__(self, **kwargs):
-        id_manager = CourseLocationManager(kwargs['course_id'])
+        course_id = kwargs['course_id']
+        id_manager = CourseLocationManager(course_id)
         kwargs.setdefault('id_reader', id_manager)
         kwargs.setdefault('id_generator', id_manager)
-        kwargs.setdefault('services', {}).setdefault('field-data', DictFieldData({}))
+
+        services = kwargs.get('services', {})
+        services.setdefault('cache', CacheService(DoNothingCache()))
+        services.setdefault('field-data', DictFieldData({}))
+        services.setdefault('sandbox', SandboxService(contentstore, course_id))
+        kwargs['services'] = services
         super().__init__(**kwargs)
 
     def handler_url(self, block, handler, suffix='', query='', thirdparty=False):  # lint-amnesty, pylint: disable=arguments-differ
@@ -116,6 +125,8 @@ def get_test_system(
 
     mako_service = StubMakoService(render_template=render_template)
 
+    replace_url_service = StubReplaceURLService()
+
     descriptor_system = get_test_descriptor_system()
 
     def get_module(descriptor):
@@ -138,7 +149,6 @@ def get_test_system(
         static_url='/static',
         track_function=Mock(name='get_test_system.track_function'),
         get_module=get_module,
-        replace_urls=str,
         filestore=Mock(name='get_test_system.filestore', root_path='.'),
         debug=True,
         hostname="edx.org",
@@ -153,6 +163,7 @@ def get_test_system(
                 waittime=10,
                 construct_callback=Mock(name='get_test_system.xqueue.construct_callback', side_effect="/"),
             ),
+            'replace_urls': replace_url_service
         },
         node_path=os.environ.get("NODE_PATH", "/usr/local/lib/node_modules"),
         course_id=course_id,

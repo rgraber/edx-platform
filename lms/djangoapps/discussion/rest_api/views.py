@@ -2,7 +2,6 @@
 Discussion API views
 """
 
-
 import logging
 import uuid
 
@@ -10,6 +9,7 @@ import edx_api_doc_tools as apidocs
 from django.contrib.auth import get_user_model
 from django.core.exceptions import BadRequest, ValidationError
 from django.shortcuts import get_object_or_404
+from drf_yasg import openapi
 from edx_rest_framework_extensions.auth.jwt.authentication import JwtAuthentication
 from edx_rest_framework_extensions.auth.session.authentication import SessionAuthenticationAllowInactiveUser
 from opaque_keys.edx.keys import CourseKey
@@ -42,24 +42,35 @@ from ..rest_api.api import (
     delete_thread,
     get_comment_list,
     get_course,
+    get_course_discussion_user_stats,
     get_course_topics,
+    get_course_topics_v2,
     get_response_comments,
     get_thread,
     get_thread_list,
     get_user_comments,
     update_comment,
-    update_thread
+    update_thread,
 )
 from ..rest_api.forms import (
     CommentGetForm,
     CommentListGetForm,
+    CourseActivityStatsForm,
     CourseDiscussionRolesForm,
     CourseDiscussionSettingsForm,
     ThreadListGetForm,
-    UserCommentListGetForm
+    TopicListGetForm,
+    UserCommentListGetForm,
+    UserOrdering,
 )
 from ..rest_api.permissions import IsStaffOrCourseTeamOrEnrolled
-from ..rest_api.serializers import CourseMetadataSerailizer, DiscussionRolesListSerializer, DiscussionRolesSerializer
+from ..rest_api.serializers import (
+    CourseMetadataSerailizer,
+    DiscussionRolesListSerializer,
+    DiscussionRolesSerializer,
+    DiscussionTopicSerializerV2,
+    TopicOrdering,
+)
 
 log = logging.getLogger(__name__)
 
@@ -98,6 +109,79 @@ class CourseView(DeveloperErrorViewMixin, APIView):
 
 
 @view_auth_classes()
+class CourseActivityStatsView(DeveloperErrorViewMixin, APIView):
+    """
+    **Use Cases**
+
+        Fetch statistics about a user's activity in a course.
+
+    **Example Requests**:
+
+        GET /api/discussion/v1/courses/course-v1:ExampleX+Subject101+2015/activity_stats?order_by=activity
+
+    **Response Values**:
+
+
+    **Example Response**
+    ```json
+    {
+        "pagination": {
+            "count": 3,
+            "next": null,
+            "num_pages": 1,
+            "previous": null
+        },
+        "results": [
+            {
+                "active_flags": 3,
+                "inactive_flags": 0,
+                "replies": 13,
+                "responses": 21,
+                "threads": 32,
+                "username": "edx"
+            },
+            {
+                "active_flags": 1,
+                "inactive_flags": 0,
+                "replies": 6,
+                "responses": 8,
+                "threads": 13,
+                "username": "honor"
+            },
+            ...
+        ]
+    }
+    ```
+    """
+
+    authentication_classes = (
+        JwtAuthentication,
+        BearerAuthenticationAllowInactiveUser,
+        SessionAuthenticationAllowInactiveUser,
+    )
+    permission_classes = (
+        permissions.IsAuthenticated,
+        IsStaffOrCourseTeamOrEnrolled,
+    )
+
+    def get(self, request, course_key_string):
+        """Implements the GET method as described in the class docstring."""
+        form_query_string = CourseActivityStatsForm(request.query_params)
+        if not form_query_string.is_valid():
+            raise ValidationError(form_query_string.errors)
+        order_by = form_query_string.cleaned_data.get('order_by', None)
+        order_by = UserOrdering(order_by) if order_by else None
+        data = get_course_discussion_user_stats(
+            request,
+            course_key_string,
+            form_query_string.cleaned_data['page'],
+            form_query_string.cleaned_data['page_size'],
+            order_by,
+        )
+        return data
+
+
+@view_auth_classes()
 class CourseTopicsView(DeveloperErrorViewMixin, APIView):
     """
     **Use Cases**
@@ -131,14 +215,76 @@ class CourseTopicsView(DeveloperErrorViewMixin, APIView):
         """
         course_key = CourseKey.from_string(course_id)
         topic_ids = self.request.GET.get('topic_id')
+        topic_ids = set(topic_ids.strip(',').split(',')) if topic_ids else None
         with modulestore().bulk_operations(course_key):
             response = get_course_topics(
                 request,
                 course_key,
-                set(topic_ids.strip(',').split(',')) if topic_ids else None,
+                topic_ids,
             )
             # Record user activity for tracking progress towards a user's course goals (for mobile app)
             UserActivity.record_user_activity(request.user, course_key, request=request, only_if_mobile_app=True)
+        return Response(response)
+
+
+@view_auth_classes()
+class CourseTopicsViewV2(DeveloperErrorViewMixin, APIView):
+    """
+    View for listing course topics.
+
+    For more information visit the
+    [API Documentation](/api-docs/?filter=discussion#/discussion/discussion_v2_course_topics_read)
+    """
+
+    @apidocs.schema(
+        parameters=[
+            apidocs.string_parameter(
+                'course_id',
+                apidocs.ParameterLocation.PATH,
+                description="Course ID",
+            ),
+            apidocs.string_parameter(
+                'topic_id',
+                apidocs.ParameterLocation.QUERY,
+                description="Comma-separated list of topic ids to filter",
+            ),
+            openapi.Parameter(
+                'order_by',
+                apidocs.ParameterLocation.QUERY,
+                required=False,
+                type=openapi.TYPE_STRING,
+                enum=list(TopicOrdering),
+                description="Sort ordering for topics",
+            ),
+        ],
+        responses={
+            200: DiscussionTopicSerializerV2(read_only=True, required=False),
+            401: "The requester is not authenticated.",
+            403: "The requester cannot access the specified course.",
+            404: "The requested course does not exist.",
+        }
+    )
+    def get(self, request, course_id):
+        """
+        **Use Cases**
+
+            Retrieve the topic listing for a course.
+
+        **Example Requests**:
+
+            GET /api/discussion/v2/course_topics/course-v1:ExampleX+Subject101+2015
+                ?topic_id={topic_id_1, topid_id_2}&order_by=course_structure
+        """
+        course_key = CourseKey.from_string(course_id)
+        form_query_params = TopicListGetForm(self.request.query_params)
+        if not form_query_params.is_valid():
+            raise ValidationError(form_query_params.errors)
+        response = get_course_topics_v2(
+            course_key,
+            request.user,
+            form_query_params.cleaned_data["topic_id"],
+            form_query_params.cleaned_data["order_by"]
+        )
         return Response(response)
 
 
@@ -254,6 +400,14 @@ class ThreadViewSet(DeveloperErrorViewMixin, ViewSet):
         * voted (optional): A boolean to vote for thread
 
         * read (optional): A boolean to mark thread as read
+
+        * closed (optional, privileged): A boolean to mark thread as closed.
+
+        * edit_reason_code (optional, privileged): A string containing a reason
+        code for editing the thread's body.
+
+        * close_reason_code (optional, privileged): A string containing a reason
+        code for closing the thread.
 
         * topic_id, type, title, raw_body, anonymous, and anonymous_to_peers
         are accepted with the same meaning as in a POST request
@@ -483,6 +637,9 @@ class CommentViewSet(DeveloperErrorViewMixin, ViewSet):
 
         * raw_body, anonymous and anonymous_to_peers are accepted with the same
         meaning as in a POST request
+
+        * edit_reason_code (optional, privileged): A string containing a reason
+        code for a moderator to edit the comment.
 
         If "application/merge-patch+json" is not the specified content type,
         a 415 error is returned.
@@ -717,8 +874,8 @@ class UploadFileView(DeveloperErrorViewMixin, APIView):
                 request, "uploaded_file", cc_settings.ALLOWED_UPLOAD_FILE_TYPES,
                 unique_file_name, max_file_size=cc_settings.MAX_UPLOAD_FILE_SIZE,
             )
-        except ValueError:
-            raise BadRequest("no `uploaded_file` was provided")  # lint-amnesty, pylint: disable=raise-missing-from
+        except ValueError as err:
+            raise BadRequest("no `uploaded_file` was provided") from err
 
         file_absolute_url = file_storage.url(stored_file_name)
 
@@ -1106,8 +1263,8 @@ class CourseDiscussionRolesAPIView(DeveloperErrorViewMixin, APIView):
         user = serializer.validated_data['user']
         try:
             update_forum_role(course_id, user, rolename, action)
-        except Role.DoesNotExist:
-            raise ValidationError(f"Role '{rolename}' does not exist")  # lint-amnesty, pylint: disable=raise-missing-from
+        except Role.DoesNotExist as err:
+            raise ValidationError(f"Role '{rolename}' does not exist") from err
 
         role = form.cleaned_data['role']
         data = {'course_id': course_id, 'users': role.users.all()}

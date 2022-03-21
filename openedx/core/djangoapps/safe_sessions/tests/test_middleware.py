@@ -191,9 +191,10 @@ class TestSafeSessionProcessResponse(TestSafeSessionsLogMixin, TestCase):
         See assert_response for information on the other
         parameters.
         """
-        with patch('django.http.HttpResponse.set_cookie') as mock_delete_cookie:
+        with patch('django.http.HttpResponse.delete_cookie') as mock_delete_cookie:
             self.assert_response(set_request_user=set_request_user, set_session_cookie=set_session_cookie)
-            assert mock_delete_cookie.called == expect_delete_called
+            assert {'sessionid', 'edx-jwt-cookie-header-payload'} \
+                <= {call.args[0] for call in mock_delete_cookie.call_args_list}
 
     def test_success(self):
         with self.assert_not_logged():
@@ -321,9 +322,10 @@ class TestSafeSessionMiddleware(TestSafeSessionsLogMixin, CacheIsolationTestCase
         assert self.request.need_to_delete_cookie
         self.cookies_from_request_to_response()
 
-        with patch('django.http.HttpResponse.set_cookie') as mock_delete_cookie:
+        with patch('django.http.HttpResponse.delete_cookie') as mock_delete_cookie:
             SafeSessionMiddleware().process_response(self.request, self.client.response)
-            assert mock_delete_cookie.called
+            assert {'sessionid', 'edx-jwt-cookie-header-payload'} \
+                <= {call.args[0] for call in mock_delete_cookie.call_args_list}
 
     def test_error(self):
         self.request.META['HTTP_ACCEPT'] = 'text/html'
@@ -331,7 +333,6 @@ class TestSafeSessionMiddleware(TestSafeSessionsLogMixin, CacheIsolationTestCase
 
     @ddt.data(['text/html', 302], ['', 401])
     @ddt.unpack
-    @override_settings(REDIRECT_TO_LOGIN_ON_SAFE_SESSION_AUTH_FAILURE=False)
     def test_error_with_http_accept(self, http_accept, expected_response):
         self.request.META['HTTP_ACCEPT'] = http_accept
         self.verify_error(expected_response)
@@ -341,9 +342,10 @@ class TestSafeSessionMiddleware(TestSafeSessionsLogMixin, CacheIsolationTestCase
         self.request.META = {'HTTP_USER_AGENT': 'open edX Mobile App Version 2.1'}
         self.verify_error(401)
 
+    @override_settings(ENFORCE_SAFE_SESSIONS=False)
     def test_warn_on_user_change_before_response(self):
         """
-        Verifies that warnings are emitted and custom attributes set if
+        Verifies that when enforcement disabled, warnings are emitted and custom attributes set if
         the user changes unexpectedly between request and response.
         """
         self.set_up_for_success()
@@ -358,10 +360,9 @@ class TestSafeSessionMiddleware(TestSafeSessionsLogMixin, CacheIsolationTestCase
         set_attr_call_args = [call.args for call in mock_attr.call_args_list]
         assert ("safe_sessions.user_mismatch", "request-response-mismatch") in set_attr_call_args
 
-    @override_settings(ENFORCE_SAFE_SESSIONS=True)
     def test_enforce_on_user_change_before_response(self):
         """
-        Copy of test_warn_on_user_change_before_response but with enforcement enabled.
+        Copy of test_warn_on_user_change_before_response but with enforcement enabled (default).
         The differences should be the status code and the session deletion.
         """
         self.set_up_for_success()
@@ -379,6 +380,7 @@ class TestSafeSessionMiddleware(TestSafeSessionsLogMixin, CacheIsolationTestCase
         set_attr_call_args = [call.args for call in mock_attr.call_args_list]
         assert ("safe_sessions.user_mismatch", "request-response-mismatch") in set_attr_call_args
 
+    @override_settings(ENFORCE_SAFE_SESSIONS=False)
     def test_warn_on_user_change_from_session(self):
         """
         Verifies that warnings are emitted and custom attributes set if
@@ -395,6 +397,7 @@ class TestSafeSessionMiddleware(TestSafeSessionsLogMixin, CacheIsolationTestCase
         set_attr_call_args = [call.args for call in mock_attr.call_args_list]
         assert ("safe_sessions.user_mismatch", "request-session-mismatch") in set_attr_call_args
 
+    @override_settings(ENFORCE_SAFE_SESSIONS=False)
     def test_warn_on_user_change_in_both(self):
         """
         Verifies that warnings are emitted and custom attributes set if
@@ -482,7 +485,7 @@ class TestSafeSessionMiddleware(TestSafeSessionsLogMixin, CacheIsolationTestCase
         new_user = UserFactory.create()
         self.request.user = new_user
         # ...but so does session, and view sets a flag to say it's OK.
-        mark_user_change_as_expected(self.client.response, new_user.id)
+        mark_user_change_as_expected(new_user.id)
 
         with self.assert_no_warning_logged():
             with patch('openedx.core.djangoapps.safe_sessions.middleware.set_custom_attribute') as mock_attr:

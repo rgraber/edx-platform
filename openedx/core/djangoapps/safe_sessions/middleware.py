@@ -90,11 +90,12 @@ from django.core.cache import cache
 from django.http import HttpResponse
 from django.utils.crypto import get_random_string
 from django.utils.deprecation import MiddlewareMixin
-
+from edx_django_utils.cache import RequestCache
 from edx_django_utils.monitoring import set_custom_attribute
 from edx_toggles.toggles import SettingToggle
 
 from common.djangoapps.util.log_sensitive import encrypt_for_log
+from openedx.core.djangoapps.user_authn.cookies import delete_logged_in_cookies
 from openedx.core.lib.mobile_utils import is_request_from_mobile_app
 
 # .. toggle_name: LOG_REQUEST_USER_CHANGES
@@ -119,8 +120,9 @@ LOG_REQUEST_USER_CHANGES = getattr(settings, 'LOG_REQUEST_USER_CHANGES', False)
 #      any user id change detected by safe sessions. The headers will provide additional debugging information. The
 #      headers will be logged for all requests up until LOG_REQUEST_USER_CHANGE_HEADERS_DURATION seconds after
 #      the time of the last mismatch. The header details will be encrypted, and only available with the private key.
-# .. toggle_warnings: To work correctly, LOG_REQUEST_USER_CHANGES must be enabled and ENFORCE_SAFE_SESSIONS must be
-#      disabled. Also, SAFE_SESSIONS_DEBUG_PUBLIC_KEY must be set. See
+# .. toggle_warnings: Logging headers of subsequent requests following a mismatch will only work if
+#      LOG_REQUEST_USER_CHANGES is enabled and ENFORCE_SAFE_SESSIONS is disabled; otherwise, only headers of the inital
+#      mismatch will be logged. Also, SAFE_SESSIONS_DEBUG_PUBLIC_KEY must be set. See
 #      https://github.com/edx/edx-platform/blob/master/common/djangoapps/util/log_sensitive.py
 #      for instructions.
 # .. toggle_use_cases: opt_in
@@ -133,25 +135,39 @@ LOG_REQUEST_USER_CHANGE_HEADERS_DURATION = getattr(settings, 'LOG_REQUEST_USER_C
 
 # .. toggle_name: ENFORCE_SAFE_SESSIONS
 # .. toggle_implementation: SettingToggle
-# .. toggle_default: False
-# .. toggle_description: Turn this toggle on to enforce safe-sessions policy.
+# .. toggle_default: True
+# .. toggle_description: Invalidate session and response if mismatch detected.
 #   That is, when the `user` attribute of the request object gets changed or
 #   no longer matches the session, the session will be invalidated and the
 #   response cancelled (changed to an error). This is intended as a backup
 #   safety measure in case an attacker (or bug) is able to change the user
-#   on a session in an unexpected way.  The behavior will be available for
-#   the Nutmeg named release and will become permanent in Olive.
-# .. toggle_warnings: Before enabling, confirm that incidences of the string
-#   "SafeCookieData user at request" in the logs only show false positives,
-#   such as people logging in while in possession of an already-valid session
-#   cookie.
-# .. toggle_use_cases: temporary
+#   on a session in an unexpected way.
+# .. toggle_warnings: Should be disabled if debugging mismatches using the
+#   LOG_REQUEST_USER_CHANGE_HEADERS toggle, otherwise series of mismatching
+#   requests from the same user cannot be investigated.  Additionally, if
+#   enabling for the first time, confirm that incidences of the string
+#   "SafeCookieData user at request" in the logs are very rare; if they are
+#   not, it is likely that there is either a bug or that a login or
+#   registration endpoint needs to call ``mark_user_change_as_expected``.
+# .. toggle_use_cases: opt_out
 # .. toggle_creation_date: 2021-12-01
-# .. toggle_target_removal_date: 2022-08-01
 # .. toggle_tickets: https://openedx.atlassian.net/browse/ARCHBOM-1861
-ENFORCE_SAFE_SESSIONS = SettingToggle('ENFORCE_SAFE_SESSIONS', default=False)
+ENFORCE_SAFE_SESSIONS = SettingToggle('ENFORCE_SAFE_SESSIONS', default=True)
 
 log = getLogger(__name__)
+
+# RequestCache for conveying information from views back up to the
+# middleware -- specifically, information about expected changes to
+# request.user
+#
+# Rejected alternatives for where to place the annotation:
+#
+# - request object: Different request objects are presented to middlewares
+#   and views, so the attribute would be lost.
+# - response object: Doesn't help in cases where an exception is thrown
+#   instead of a response returned. Still want to validate that users don't
+#   change unexpectedly on a 404, for example.
+request_cache = RequestCache(namespace="safe-sessions")
 
 
 class SafeCookieError(Exception):
@@ -662,7 +678,7 @@ class SafeSessionMiddleware(SessionMiddleware, MiddlewareMixin):
         #
 
         # The relevant views set a flag to indicate the exemption.
-        if getattr(response, 'safe_sessions_expected_user_change', None):
+        if request_cache.get_cached_response('expected_user_change').is_found:
             return no_mismatch_dict
 
         if not hasattr(request, 'safe_cookie_verified_user_id'):
@@ -672,6 +688,10 @@ class SafeSessionMiddleware(SessionMiddleware, MiddlewareMixin):
         if hasattr(request.user, 'real_user'):
             # If a view overrode the request.user with a masqueraded user, this will
             #   revert/clean-up that change during response processing.
+            #   Known places this is set:
+            #
+            #   - lms.djangoapps.courseware.masquerade::setup_masquerade
+            #   - openedx.core.djangoapps.content.learning_sequences.views::CourseOutlineView
             request.user = request.user.real_user
 
         # determine if the request.user is different now than it was on the initial request
@@ -745,7 +765,7 @@ class SafeSessionMiddleware(SessionMiddleware, MiddlewareMixin):
         """
         # NOTE: request.headers seems to pick up initial values, but won't adjust as the request object is edited.
         #   For example, the session cookie will likely be the safe session version.
-        return encrypt_for_log(str(request.headers), settings.SAFE_SESSIONS_DEBUG_PUBLIC_KEY)
+        return encrypt_for_log(str(request.headers), getattr(settings, 'SAFE_SESSIONS_DEBUG_PUBLIC_KEY', None))
 
 
 def obscure_token(value: Union[str, None]) -> Union[str, None]:
@@ -804,17 +824,16 @@ def _is_cookie_present(response):
 
 def _delete_cookie(request, response):
     """
-    Delete the cookie by setting the expiration to a date in the past,
-    while maintaining the domain, secure, and httponly settings.
+    Delete session cookie, as well as related login cookies.
     """
-    response.set_cookie(
+    response.delete_cookie(
         settings.SESSION_COOKIE_NAME,
-        max_age=0,
-        expires='Thu, 01-Jan-1970 00:00:00 GMT',
+        path='/',
         domain=settings.SESSION_COOKIE_DOMAIN,
-        secure=settings.SESSION_COOKIE_SECURE or None,
-        httponly=settings.SESSION_COOKIE_HTTPONLY or None,
     )
+    # Keep JWT cookies and others in sync with session cookie
+    # (meaning, in this case, delete them too).
+    delete_logged_in_cookies(response)
 
     # Note, there is no request.user attribute at this point.
     if hasattr(request, 'session') and hasattr(request.session, 'session_key'):
@@ -887,7 +906,7 @@ def track_request_user_changes(request):
     request.__class__ = SafeSessionRequestWrapper
 
 
-def mark_user_change_as_expected(response, new_user_id):
+def mark_user_change_as_expected(new_user_id):
     """
     Indicate to the safe-sessions middleware that it is expected that
     the user is changing between the request and response phase of
@@ -896,4 +915,4 @@ def mark_user_change_as_expected(response, new_user_id):
     The new_user_id may be None or an LMS user ID, and may be the same
     as the previous user ID.
     """
-    response.safe_sessions_expected_user_change = {'new_user_id': new_user_id}
+    request_cache.set('expected_user_change', new_user_id)

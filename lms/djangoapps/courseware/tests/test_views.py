@@ -9,7 +9,7 @@ import json
 import re
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, PropertyMock, call, create_autospec, patch
-from urllib.parse import quote, urlencode
+from urllib.parse import urlencode
 from uuid import uuid4
 
 import ddt
@@ -43,12 +43,7 @@ from xmodule.data import CertificatesDisplayBehaviors
 from xmodule.graders import ShowCorrectness
 from xmodule.modulestore import ModuleStoreEnum
 from xmodule.modulestore.django import modulestore
-from xmodule.modulestore.tests.django_utils import (
-    TEST_DATA_SPLIT_MODULESTORE,
-    CourseUserType,
-    ModuleStoreTestCase,
-    SharedModuleStoreTestCase
-)
+from xmodule.modulestore.tests.django_utils import CourseUserType, ModuleStoreTestCase, SharedModuleStoreTestCase
 from xmodule.modulestore.tests.factories import (
     CourseFactory,
     ItemFactory,
@@ -104,7 +99,6 @@ from lms.djangoapps.grades.config.waffle import waffle_switch as grades_waffle_s
 from lms.djangoapps.instructor.access import allow_access
 from lms.djangoapps.verify_student.models import VerificationDeadline
 from lms.djangoapps.verify_student.services import IDVerificationService
-from openedx.core.djangoapps.agreements.toggles import ENABLE_INTEGRITY_SIGNATURE
 from openedx.core.djangoapps.catalog.tests.factories import CourseFactory as CatalogCourseFactory
 from openedx.core.djangoapps.catalog.tests.factories import CourseRunFactory, ProgramFactory
 from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
@@ -132,7 +126,7 @@ from openedx.features.course_experience.url_helpers import (
 )
 from openedx.features.enterprise_support.tests.mixins.enterprise import EnterpriseTestConsentRequired
 
-QUERY_COUNT_TABLE_BLACKLIST = WAFFLE_TABLES
+QUERY_COUNT_TABLE_IGNORELIST = WAFFLE_TABLES
 
 FEATURES_WITH_DISABLE_HONOR_CERTIFICATE = settings.FEATURES.copy()
 FEATURES_WITH_DISABLE_HONOR_CERTIFICATE['DISABLE_HONOR_CERTIFICATES'] = True
@@ -164,8 +158,6 @@ class TestJumpTo(ModuleStoreTestCase):
     """
     Check the jumpto link for a course.
     """
-    MODULESTORE = TEST_DATA_SPLIT_MODULESTORE
-
     @ddt.data(
         (False, None, False),  # not provided -> Active experience
         (False, "blarfingar", False),  # nonsense -> Active experience
@@ -404,15 +396,10 @@ class IndexQueryTestCase(ModuleStoreTestCase):
     CREATE_USER = False
     NUM_PROBLEMS = 20
 
-    @ddt.data(
-        (ModuleStoreEnum.Type.mongo, 10, 220),
-        (ModuleStoreEnum.Type.split, 4, 205),
-    )
-    @ddt.unpack
-    def test_index_query_counts(self, store_type, expected_mongo_query_count, expected_mysql_query_count):
+    def test_index_query_counts(self):
         # TODO: decrease query count as part of REVO-28
         ContentTypeGatingConfig.objects.create(enabled=True, enabled_as_of=datetime(2018, 1, 1))
-        with self.store.default_store(store_type):
+        with self.store.default_store(ModuleStoreEnum.Type.split):
             course = CourseFactory.create()
             with self.store.bulk_operations(course.id):
                 chapter = ItemFactory.create(category='chapter', parent_location=course.location)
@@ -425,8 +412,8 @@ class IndexQueryTestCase(ModuleStoreTestCase):
         self.client.login(username=self.user.username, password=TEST_PASSWORD)
         CourseEnrollment.enroll(self.user, course.id)
 
-        with self.assertNumQueries(expected_mysql_query_count, table_blacklist=QUERY_COUNT_TABLE_BLACKLIST):
-            with check_mongo_calls(expected_mongo_query_count):
+        with self.assertNumQueries(206, table_ignorelist=QUERY_COUNT_TABLE_IGNORELIST):
+            with check_mongo_calls(3):
                 url = reverse(
                     'courseware_section',
                     kwargs={
@@ -541,15 +528,15 @@ class ViewsTestCase(BaseViewsTestCase):
 
     def test_index_success(self):
         response = self._verify_index_response()
-        self.assertContains(response, self.problem2.location)
+        self.assertContains(response, self.problem2.location.replace(branch=None, version_guid=None))
 
         # re-access to the main course page redirects to last accessed view.
         url = reverse('courseware', kwargs={'course_id': str(self.course_key)})
         response = self.client.get(url)
         assert response.status_code == 302
         response = self.client.get(response.url)
-        self.assertNotContains(response, self.problem.location)
-        self.assertContains(response, self.problem2.location)
+        self.assertNotContains(response, self.problem.location.replace(branch=None, version_guid=None))
+        self.assertContains(response, self.problem2.location.replace(branch=None, version_guid=None))
 
     def test_index_nonexistent_chapter(self):
         self._verify_index_response(expected_response_code=404, chapter_name='non-existent')
@@ -1099,9 +1086,8 @@ class ViewsTestCase(BaseViewsTestCase):
         returning a render_to_string, so we will render via the courseware URL in order to include
         the needed context
         """
-        course_id = quote(str(self.course.id).encode("utf-8"))
         response = self.client.get(
-            reverse('courseware', args=[str(course_id)]),
+            reverse('courseware', args=[str(self.course.id)]),
             follow=True
         )
         test_responses = [
@@ -1155,6 +1141,7 @@ class TestProgramMarketingView(SharedModuleStoreTestCase):
 
 # setting TIME_ZONE_DISPLAYED_FOR_DEADLINES explicitly
 @override_settings(TIME_ZONE_DISPLAYED_FOR_DEADLINES="UTC")
+@_set_mfe_flag(activate_mfe=False)
 class BaseDueDateTests(ModuleStoreTestCase):
     """
     Base class that verifies that due dates are rendered correctly on a page
@@ -1339,18 +1326,17 @@ class ProgressPageBaseTests(ModuleStoreTestCase):
 
     def create_course(self, **options):
         """Create the test course."""
-        self.course = CourseFactory.create(  # lint-amnesty, pylint: disable=attribute-defined-outside-init
+        self.course = CourseFactory.create(  # pylint: disable=attribute-defined-outside-init
             start=datetime(2013, 9, 16, 7, 17, 28),
-            grade_cutoffs={'çü†øƒƒ': 0.75, 'Pass': 0.5},
             end=datetime.now(),
             certificate_available_date=datetime.now(UTC),
             certificates_display_behavior=CertificatesDisplayBehaviors.END_WITH_DATE,
-            **options
+            **options,
         )
 
     def setup_course(self, **course_options):
         """Create the test course and content, and enroll the user."""
-        self.create_course(**course_options)
+        self.create_course(**course_options, grading_policy={'GRADE_CUTOFFS': {'çü†øƒƒ': 0.75, 'Pass': 0.5}})
         with self.store.bulk_operations(self.course.id):
             self.chapter = ItemFactory.create(category='chapter', parent_location=self.course.location)
             self.section = ItemFactory.create(category='sequential', parent_location=self.chapter.location)
@@ -1399,16 +1385,14 @@ class ProgressPageTests(ProgressPageBaseTests):
         ItemFactory.create(category='acid', parent_location=self.vertical.location)
         self._get_progress_page()
 
-    @ddt.data(ModuleStoreEnum.Type.mongo, ModuleStoreEnum.Type.split)
-    def test_student_progress_with_valid_and_invalid_id(self, default_store):
+    def test_student_progress_with_valid_and_invalid_id(self):
         """
-         Check that invalid 'student_id' raises Http404 for both old mongo and
-         split mongo courses.
+         Check that invalid 'student_id' raises Http404.
         """
 
-        # Create new course with respect to 'default_store'
+        # Create new course
         # Enroll student into course
-        self.course = CourseFactory.create(default_store=default_store)  # lint-amnesty, pylint: disable=attribute-defined-outside-init
+        self.course = CourseFactory.create()  # lint-amnesty, pylint: disable=attribute-defined-outside-init
         CourseEnrollmentFactory(user=self.user, course_id=self.course.id, mode=CourseMode.HONOR)
 
         # Invalid Student Ids (Integer and Non-int)
@@ -1546,7 +1530,7 @@ class ProgressPageTests(ProgressPageBaseTests):
         self.course.certificates = {'certificates': certificates}
         self.course.cert_html_view_enabled = True
         self.course.save()
-        self.store.update_item(self.course, self.user.id)
+        self.update_course(self.course, self.user.id)
 
         with patch('lms.djangoapps.grades.course_grade_factory.CourseGradeFactory.read') as mock_create:
             course_grade = mock_create.return_value
@@ -1563,7 +1547,7 @@ class ProgressPageTests(ProgressPageBaseTests):
 
             # when course certificate is not active
             certificates[0]['is_active'] = False
-            self.store.update_item(self.course, self.user.id)
+            self.update_course(self.course, self.user.id)
 
             resp = self._get_progress_page()
             self.assertNotContains(resp, "View my Certificate")
@@ -1600,8 +1584,8 @@ class ProgressPageTests(ProgressPageBaseTests):
             self.assertContains(resp, "Download Your Certificate")
 
     @ddt.data(
-        (True, 52),
-        (False, 52),
+        (True, 53),
+        (False, 53),
     )
     @ddt.unpack
     def test_progress_queries_paced_courses(self, self_paced, query_count):
@@ -1609,13 +1593,13 @@ class ProgressPageTests(ProgressPageBaseTests):
         # TODO: decrease query count as part of REVO-28
         ContentTypeGatingConfig.objects.create(enabled=True, enabled_as_of=datetime(2018, 1, 1))
         self.setup_course(self_paced=self_paced)
-        with self.assertNumQueries(query_count, table_blacklist=QUERY_COUNT_TABLE_BLACKLIST), check_mongo_calls(1):
+        with self.assertNumQueries(query_count, table_ignorelist=QUERY_COUNT_TABLE_IGNORELIST), check_mongo_calls(2):
             self._get_progress_page()
 
     @patch.dict(settings.FEATURES, {'ASSUME_ZERO_GRADE_IF_ABSENT_FOR_ALL_TESTS': False})
     @ddt.data(
-        (False, 60, 42),
-        (True, 52, 36)
+        (False, 61, 43),
+        (True, 53, 37)
     )
     @ddt.unpack
     def test_progress_queries(self, enable_waffle, initial, subsequent):
@@ -1623,15 +1607,15 @@ class ProgressPageTests(ProgressPageBaseTests):
         self.setup_course()
         with override_waffle_switch(grades_waffle_switch(ASSUME_ZERO_GRADE_IF_ABSENT), active=enable_waffle):
             with self.assertNumQueries(
-                initial, table_blacklist=QUERY_COUNT_TABLE_BLACKLIST
-            ), check_mongo_calls(1):
+                initial, table_ignorelist=QUERY_COUNT_TABLE_IGNORELIST
+            ), check_mongo_calls(2):
                 self._get_progress_page()
 
             # subsequent accesses to the progress page require fewer queries.
             for _ in range(2):
                 with self.assertNumQueries(
-                    subsequent, table_blacklist=QUERY_COUNT_TABLE_BLACKLIST
-                ), check_mongo_calls(1):
+                    subsequent, table_ignorelist=QUERY_COUNT_TABLE_IGNORELIST
+                ), check_mongo_calls(2):
                     self._get_progress_page()
 
     @ddt.data(
@@ -1696,7 +1680,7 @@ class ProgressPageTests(ProgressPageBaseTests):
         self.course.certificates = {'certificates': certificates}
         self.course.cert_html_view_enabled = True
         self.course.save()
-        self.store.update_item(self.course, self.user.id)
+        self.update_course(self.course, self.user.id)
 
         with patch('lms.djangoapps.grades.course_grade_factory.CourseGradeFactory.read') as mock_create:
             course_grade = mock_create.return_value
@@ -1733,7 +1717,7 @@ class ProgressPageTests(ProgressPageBaseTests):
         self.course.certificates = {'certificates': certificates}
         self.course.cert_html_view_enabled = True
         self.course.save()
-        self.store.update_item(self.course, self.user.id)
+        self.update_course(self.course, self.user.id)
         CertificateAllowlistFactory.create(
             user=self.user,
             course_id=self.course.id
@@ -1945,7 +1929,7 @@ class ProgressPageTests(ProgressPageBaseTests):
         assert response.title == 'Your certificate will be available soon!'
 
     @ddt.data(True, False)
-    def test_no_certs_generated_and_not_verified(self, waffle_override):
+    def test_no_certs_generated_and_not_verified(self, enable_integrity_signature):
         """
         Verify if the learner is not ID Verified, and the certs are not yet generated,
         but the learner is eligible, the get_cert_data would return cert status Unverified
@@ -1954,14 +1938,14 @@ class ProgressPageTests(ProgressPageBaseTests):
         CertificateGenerationCourseSetting(
             course_key=self.course.id, self_generation_enabled=True
         ).save()
-        with override_waffle_flag(ENABLE_INTEGRITY_SIGNATURE, active=waffle_override):
+        with patch.dict(settings.FEATURES, ENABLE_INTEGRITY_SIGNATURE=enable_integrity_signature):
             with patch(
                 'lms.djangoapps.certificates.api.certificate_downloadable_status',
                 return_value=self.mock_certificate_downloadable_status()
             ):
                 response = views.get_cert_data(self.user, self.course, CourseMode.VERIFIED, MagicMock(passed=True))
 
-        if waffle_override:
+        if enable_integrity_signature:
             assert response.cert_status == 'requesting'
             assert response.title == 'Congratulations, you qualified for a certificate!'
         else:
@@ -2344,8 +2328,8 @@ class GenerateUserCertTests(ModuleStoreTestCase):
             number='verified',
             end=datetime.now(),
             display_name='Verified Course',
-            grade_cutoffs={'cutoff': 0.75, 'Pass': 0.5},
-            self_paced=True
+            grading_policy={'GRADE_CUTOFFS': {'cutoff': 0.75, 'Pass': 0.5}},
+            self_paced=True,
         )
         self.enrollment = CourseEnrollment.enroll(self.student, self.course.id, mode='honor')
         assert self.client.login(username=self.student, password=TEST_PASSWORD)
@@ -2540,21 +2524,22 @@ class TestIndexView(ModuleStoreTestCase):
     """
     Tests of the courseware.views.index view.
     """
-
     @XBlock.register_temp_plugin(ViewCheckerBlock, 'view_checker')
-    @ddt.data(ModuleStoreEnum.Type.mongo, ModuleStoreEnum.Type.split)
-    def test_student_state(self, default_store):
+    def test_student_state(self):
         """
         Verify that saved student state is loaded for xblocks rendered in the index view.
         """
         user = UserFactory()
 
-        with modulestore().default_store(default_store):
+        with modulestore().default_store(ModuleStoreEnum.Type.split):
             course = CourseFactory.create()
-            chapter = ItemFactory.create(parent=course, category='chapter')
-            section = ItemFactory.create(parent=chapter, category='view_checker', display_name="Sequence Checker")
-            vertical = ItemFactory.create(parent=section, category='view_checker', display_name="Vertical Checker")
-            block = ItemFactory.create(parent=vertical, category='view_checker', display_name="Block Checker")
+            chapter = ItemFactory.create(parent_location=course.location, category='chapter')
+            section = ItemFactory.create(parent_location=chapter.location, category='view_checker',
+                                         display_name="Sequence Checker")
+            vertical = ItemFactory.create(parent_location=section.location, category='view_checker',
+                                          display_name="Vertical Checker")
+            block = ItemFactory.create(parent_location=vertical.location, category='view_checker',
+                                       display_name="Block Checker")
 
         for item in (section, vertical, block):
             StudentModuleFactory.create(
@@ -2842,10 +2827,9 @@ class TestIndexViewCompleteOnView(ModuleStoreTestCase, CompletionWaffleTestMixin
         CourseOverview.load_from_module_store(self.course.id)
         CourseEnrollmentFactory(user=self.user, course_id=self.course.id)
 
-    @ddt.data(ModuleStoreEnum.Type.mongo, ModuleStoreEnum.Type.split)
-    def test_completion_service_disabled(self, default_store):
+    def test_completion_service_disabled(self):
 
-        self.setup_course(default_store)
+        self.setup_course(ModuleStoreEnum.Type.split)
         assert self.client.login(username=self.user.username, password='test')
 
         response = self.client.get(self.section_1_url)
@@ -2854,12 +2838,11 @@ class TestIndexViewCompleteOnView(ModuleStoreTestCase, CompletionWaffleTestMixin
         response = self.client.get(self.section_2_url)
         self.assertNotContains(response, 'data-mark-completed-on-view-after-delay')
 
-    @ddt.data(ModuleStoreEnum.Type.mongo, ModuleStoreEnum.Type.split)
-    def test_completion_service_enabled(self, default_store):
+    def test_completion_service_enabled(self):
 
         self.override_waffle_switch(True)
 
-        self.setup_course(default_store)
+        self.setup_course(ModuleStoreEnum.Type.split)
         assert self.client.login(username=self.user.username, password='test')
 
         response = self.client.get(self.section_1_url)
@@ -2906,6 +2889,7 @@ class TestIndexViewCompleteOnView(ModuleStoreTestCase, CompletionWaffleTestMixin
 
 
 @ddt.ddt
+@_set_mfe_flag(activate_mfe=False)
 class TestIndexViewWithVerticalPositions(ModuleStoreTestCase):
     """
     Test the index view to handle vertical positions. Confirms that first position is loaded
@@ -2923,11 +2907,12 @@ class TestIndexViewWithVerticalPositions(ModuleStoreTestCase):
         # create course with 3 positions
         self.course = CourseFactory.create()
         with self.store.bulk_operations(self.course.id):
-            self.chapter = ItemFactory.create(parent=self.course, category='chapter')
-            self.section = ItemFactory.create(parent=self.chapter, category='sequential', display_name="Sequence")
-            ItemFactory.create(parent=self.section, category='vertical', display_name="Vertical1")
-            ItemFactory.create(parent=self.section, category='vertical', display_name="Vertical2")
-            ItemFactory.create(parent=self.section, category='vertical', display_name="Vertical3")
+            self.chapter = ItemFactory.create(parent_location=self.course.location, category='chapter')
+            self.section = ItemFactory.create(parent_location=self.chapter.location, category='sequential',
+                                              display_name="Sequence")
+            ItemFactory.create(parent_location=self.section.location, category='vertical', display_name="Vertical1")
+            ItemFactory.create(parent_location=self.section.location, category='vertical', display_name="Vertical2")
+            ItemFactory.create(parent_location=self.section.location, category='vertical', display_name="Vertical3")
 
         CourseOverview.load_from_module_store(self.course.id)
 
@@ -2987,16 +2972,18 @@ class TestIndexViewWithGating(ModuleStoreTestCase, MilestonesTestCaseMixin):
         with self.store.bulk_operations(self.course.id):
             self.course.enable_subsection_gating = True
             self.course.save()
-            self.store.update_item(self.course, 0)
-            self.chapter = ItemFactory.create(parent=self.course, category="chapter", display_name="Chapter")
+            self.course = self.update_course(self.course, 0)
+            self.chapter = ItemFactory.create(
+                parent_location=self.course.location, category="chapter", display_name="Chapter",
+            )
             self.open_seq = ItemFactory.create(
-                parent=self.chapter, category='sequential', display_name="Open Sequential"
+                parent_location=self.chapter.location, category='sequential', display_name="Open Sequential"
             )
-            ItemFactory.create(parent=self.open_seq, category='problem', display_name="Problem 1")
+            ItemFactory.create(parent_location=self.open_seq.location, category='problem', display_name="Problem 1")
             self.gated_seq = ItemFactory.create(
-                parent=self.chapter, category='sequential', display_name="Gated Sequential"
+                parent_location=self.chapter.location, category='sequential', display_name="Gated Sequential"
             )
-            ItemFactory.create(parent=self.gated_seq, category='problem', display_name="Problem 2")
+            ItemFactory.create(parent_location=self.gated_seq.location, category='problem', display_name="Problem 2")
 
         gating_api.add_prerequisite(self.course.id, self.open_seq.location)
         gating_api.set_required_content(self.course.id, self.gated_seq.location, self.open_seq.location, 100)
@@ -3037,9 +3024,9 @@ class TestIndexViewWithCourseDurationLimits(ModuleStoreTestCase):
         self.user = UserFactory()
         self.course = CourseFactory.create(start=datetime.now() - timedelta(weeks=1))
         with self.store.bulk_operations(self.course.id):
-            self.chapter = ItemFactory.create(parent=self.course, category="chapter")
-            self.sequential = ItemFactory.create(parent=self.chapter, category='sequential')
-            self.vertical = ItemFactory.create(parent=self.sequential, category="vertical")
+            self.chapter = ItemFactory.create(parent_location=self.course.location, category="chapter")
+            self.sequential = ItemFactory.create(parent_location=self.chapter.location, category='sequential')
+            self.vertical = ItemFactory.create(parent_location=self.sequential.location, category="vertical")
 
         CourseEnrollmentFactory(user=self.user, course_id=self.course.id)
 
@@ -3309,6 +3296,7 @@ class TestRenderXBlockSelfPaced(TestRenderXBlock):  # lint-amnesty, pylint: disa
         return options
 
 
+@_set_mfe_flag(activate_mfe=False)
 class TestIndexViewCrawlerStudentStateWrites(SharedModuleStoreTestCase):
     """
     Ensure that courseware index requests do not trigger student state writes.
@@ -3441,8 +3429,6 @@ class DatesTabTestCase(ModuleStoreTestCase):
     """
     Ensure that the dates page renders with the correct data for both a verified and audit learner
     """
-    MODULESTORE = TEST_DATA_SPLIT_MODULESTORE
-
     def setUp(self):
         super().setUp()
 
@@ -3693,8 +3679,6 @@ class TestShowCoursewareMFE(TestCase):
 
 @ddt.ddt
 class MFERedirectTests(BaseViewsTestCase):  # lint-amnesty, pylint: disable=missing-class-docstring
-    MODULESTORE = TEST_DATA_SPLIT_MODULESTORE
-
     def test_learner_redirect(self):
         # learners will be redirected when the waffle flag is set
         lms_url, mfe_url, __ = self._get_urls()
@@ -3740,8 +3724,6 @@ class PreviewRedirectTests(BaseViewsTestCase):
     * user is global staff member
     * user is member of the course team
     """
-    MODULESTORE = TEST_DATA_SPLIT_MODULESTORE
-
     def test_staff_no_redirect(self):
         __, __, preview_url = self._get_urls()
         with patch.object(access_utils, 'get_current_request_hostname',
@@ -3899,8 +3881,8 @@ class TestCourseWideResources(ModuleStoreTestCase):
         css = ['https://testcdn.com/css/lib.min.css', '//testcdn.com/css/lib2.css', '/test.css']
 
         course = CourseFactory.create(course_wide_js=js, course_wide_css=css)
-        chapter = ItemFactory.create(parent=course, category='chapter')
-        sequence = ItemFactory.create(parent=chapter, category='sequential', display_name='Sequence')
+        chapter = ItemFactory.create(parent_location=course.location, category='chapter')
+        sequence = ItemFactory.create(parent_location=chapter.location, category='sequential', display_name='Sequence')
 
         CourseOverview.load_from_module_store(course.id)
         CourseEnrollmentFactory(user=user, course_id=course.id)

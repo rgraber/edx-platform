@@ -8,6 +8,7 @@ import json
 import re
 from contextlib import closing
 from datetime import datetime
+from urllib.parse import parse_qs
 
 import httpretty
 from PIL import Image
@@ -30,10 +31,19 @@ def _get_thread_callback(thread_data):
         additional required fields.
         """
         response_data = make_minimal_cs_thread(thread_data)
-        for key, val_list in request.parsed_body.items():
+        original_data = response_data.copy()
+        for key, val_list in parsed_body(request).items():
             val = val_list[0]
             if key in ["anonymous", "anonymous_to_peers", "closed", "pinned"]:
                 response_data[key] = val == "True"
+            elif key == "edit_reason_code":
+                response_data["edit_history"] = [
+                    {
+                        "original_body": original_data["body"],
+                        "author": thread_data.get('username'),
+                        "reason_code": val,
+                    },
+                ]
             else:
                 response_data[key] = val
         return (200, headers, json.dumps(response_data))
@@ -52,14 +62,23 @@ def _get_comment_callback(comment_data, thread_id, parent_id):
         Simulate the comment creation or update endpoint as described above.
         """
         response_data = make_minimal_cs_comment(comment_data)
+        original_data = response_data.copy()
         # thread_id and parent_id are not included in request payload but
         # are returned by the comments service
         response_data["thread_id"] = thread_id
         response_data["parent_id"] = parent_id
-        for key, val_list in request.parsed_body.items():
+        for key, val_list in parsed_body(request).items():
             val = val_list[0]
             if key in ["anonymous", "anonymous_to_peers", "endorsed"]:
                 response_data[key] = val == "True"
+            elif key == "edit_reason_code":
+                response_data["edit_history"] = [
+                    {
+                        "original_body": original_data["body"],
+                        "author": comment_data.get('username'),
+                        "reason_code": val,
+                    },
+                ]
             else:
                 response_data[key] = val
         return (200, headers, json.dumps(response_data))
@@ -277,6 +296,21 @@ class CommentsServiceMockMixin:
             status=200
         )
 
+    def register_course_stats_response(self, course_key, stats, page, num_pages):
+        """Register a mock response for GET on the CS user course stats instance endpoint"""
+        assert httpretty.is_enabled(), 'httpretty must be enabled to mock calls.'
+        httpretty.register_uri(
+            httpretty.GET,
+            f"http://localhost:4567/api/v1/users/{course_key}/stats",
+            body=json.dumps({
+                "user_stats": stats,
+                "page": page,
+                "num_pages": num_pages,
+                "count": len(stats),
+            }),
+            status=200
+        )
+
     def register_subscription_response(self, user):
         """
         Register a mock response for POST and DELETE on the CS user subscription
@@ -383,7 +417,7 @@ class CommentsServiceMockMixin:
         """
         Assert that the given mock request had the expected query parameters
         """
-        actual_params = dict(httpretty_request.querystring)
+        actual_params = dict(querystring(httpretty_request))
         actual_params.pop("request_id")  # request_id is random
         assert actual_params == expected_params
 
@@ -422,8 +456,15 @@ class CommentsServiceMockMixin:
             "voted": False,
             "vote_count": 0,
             "editable_fields": [
-                "abuse_flagged", "anonymous", "following", "raw_body", "read",
-                "title", "topic_id", "type", "voted"
+                "abuse_flagged",
+                "anonymous",
+                "following",
+                "raw_body",
+                "read",
+                "title",
+                "topic_id",
+                "type",
+                "voted",
             ],
             "course_id": str(self.course.id),
             "topic_id": "test_topic",
@@ -444,6 +485,10 @@ class CommentsServiceMockMixin:
             "id": "test_thread",
             "type": "discussion",
             "response_count": 0,
+            "last_edit": None,
+            "closed_by": None,
+            "close_reason": None,
+            "close_reason_code": None,
         }
         response_data.update(overrides or {})
         return response_data
@@ -457,7 +502,7 @@ def make_minimal_cs_thread(overrides=None):
     ret = {
         "type": "thread",
         "id": "dummy",
-        "course_id": "dummy/dummy/dummy",
+        "course_id": "course-v1:dummy+dummy+dummy",
         "commentable_id": "dummy",
         "group_id": None,
         "user_id": "0",
@@ -481,6 +526,8 @@ def make_minimal_cs_thread(overrides=None):
         "read": False,
         "endorsed": False,
         "resp_total": 0,
+        "closed_by": None,
+        "close_reason_code": None,
     }
     ret.update(overrides or {})
     return ret
@@ -580,3 +627,17 @@ class ProfileImageTestMixin:
                 }
             }
         }
+
+
+def parsed_body(request):
+    """Returns a parsed dictionary version of a request body"""
+    # This could just be HTTPrettyRequest.parsed_body, but that method double-decodes '%2B' -> '+' -> ' '.
+    # You can just remove this method when this issue is fixed: https://github.com/gabrielfalcao/HTTPretty/issues/240
+    return parse_qs(request.body.decode('utf8'))
+
+
+def querystring(request):
+    """Returns a parsed dictionary version of a query string"""
+    # This could just be HTTPrettyRequest.querystring, but that method double-decodes '%2B' -> '+' -> ' '.
+    # You can just remove this method when this issue is fixed: https://github.com/gabrielfalcao/HTTPretty/issues/240
+    return parse_qs(request.path.split('?', 1)[-1])

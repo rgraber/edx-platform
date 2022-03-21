@@ -472,6 +472,18 @@ FEATURES = {
     # .. toggle_target_removal_date: 2021-10-01
     # .. toggle_tickets: 'https://openedx.atlassian.net/browse/MICROBA-1405'
     'ENABLE_V2_CERT_DISPLAY_SETTINGS': False,
+
+    # .. toggle_name: FEATURES['ENABLE_INTEGRITY_SIGNATURE']
+    # .. toggle_implementation: DjangoSetting
+    # .. toggle_default: False
+    # .. toggle_description: Whether to replace ID verification course/certificate requirement
+    # with an in-course Honor Code agreement
+    # (https://github.com/edx/edx-name-affirmation)
+    # .. toggle_use_cases: open_edx
+    # .. toggle_creation_date: 2022-02-15
+    # .. toggle_target_removal_date: None
+    # .. toggle_tickets: 'https://openedx.atlassian.net/browse/MST-1348'
+    'ENABLE_INTEGRITY_SIGNATURE': False,
 }
 
 # .. toggle_name: ENABLE_COPPA_COMPLIANCE
@@ -495,6 +507,7 @@ IDA_LOGOUT_URI_LIST = []
 ############################# MICROFRONTENDS ###################################
 COURSE_AUTHORING_MICROFRONTEND_URL = None
 DISCUSSIONS_MICROFRONTEND_URL = None
+DISCUSSIONS_MFE_FEEDBACK_URL = None
 LIBRARY_AUTHORING_MICROFRONTEND_URL = None
 # .. toggle_name: ENABLE_AUTHN_RESET_PASSWORD_HIBP_POLICY
 # .. toggle_implementation: DjangoSetting
@@ -739,19 +752,17 @@ XQUEUE_INTERFACE = {
 
 MIDDLEWARE = [
     'openedx.core.lib.x_forwarded_for.middleware.XForwardedForMiddleware',
-
     'crum.CurrentRequestUserMiddleware',
 
-    'edx_django_utils.monitoring.DeploymentMonitoringMiddleware',
-    # A newer and safer request cache.
+    # Resets the request cache.
     'edx_django_utils.cache.middleware.RequestCacheMiddleware',
+
+    # Various monitoring middleware
+    'edx_django_utils.monitoring.CookieMonitoringMiddleware',
+    'edx_django_utils.monitoring.DeploymentMonitoringMiddleware',
     'edx_django_utils.monitoring.MonitoringMemoryMiddleware',
 
-    # Cookie monitoring
-    'openedx.core.lib.request_utils.CookieMonitoringMiddleware',
-
-    # After cookie monitoring, but before anything else that looks at
-    # cookies, especially the session middleware
+    # Before anything that looks at cookies, especially the session middleware
     'openedx.core.djangoapps.cookie_metadata.middleware.CookieNameChange',
 
     'openedx.core.djangoapps.header_control.middleware.HeaderControlMiddleware',
@@ -1816,6 +1827,7 @@ OPTIONAL_APPS = (
     ('openassessment', 'openedx.core.djangoapps.content.course_overviews.apps.CourseOverviewsConfig'),
     ('openassessment.assessment', 'openedx.core.djangoapps.content.course_overviews.apps.CourseOverviewsConfig'),
     ('openassessment.fileupload', 'openedx.core.djangoapps.content.course_overviews.apps.CourseOverviewsConfig'),
+    ('openassessment.staffgrader', 'openedx.core.djangoapps.content.course_overviews.apps.CourseOverviewsConfig'),
     ('openassessment.workflow', 'openedx.core.djangoapps.content.course_overviews.apps.CourseOverviewsConfig'),
     ('openassessment.xblock', 'openedx.core.djangoapps.content.course_overviews.apps.CourseOverviewsConfig'),
 
@@ -2024,6 +2036,12 @@ COMPREHENSIVE_THEME_DIRS = []
 # .. setting_description: See LMS annotation.
 #   "COMPREHENSIVE_THEME_LOCALE_PATHS" : ["/edx/src/edx-themes/conf/locale"].
 COMPREHENSIVE_THEME_LOCALE_PATHS = []
+
+# .. setting_name: PREPEND_LOCALE_PATHS
+# .. setting_default: []
+# .. setting_description: A list of the paths to locale directories to load first e.g.
+#   "PREPEND_LOCALE_PATHS" : ["/edx/my-locales/"].
+PREPEND_LOCALE_PATHS = []
 
 # .. setting_name: DEFAULT_SITE_THEME
 # .. setting_default: None
@@ -2485,10 +2503,10 @@ LOGIN_AND_REGISTER_FORM_RATELIMIT = '100/5m'
 RESET_PASSWORD_TOKEN_VALIDATE_API_RATELIMIT = '30/7d'
 RESET_PASSWORD_API_RATELIMIT = '30/7d'
 
-
 ##### REGISTRATION RATE LIMIT SETTINGS #####
 REGISTRATION_VALIDATION_RATELIMIT = '30/7d'
 REGISTRATION_RATELIMIT = '60/7d'
+OPTIONAL_FIELD_API_RATELIMIT = '10/h'
 
 ##### PASSWORD RESET RATE LIMIT SETTINGS #####
 PASSWORD_RESET_IP_RATE = '1/m'

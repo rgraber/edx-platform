@@ -19,7 +19,7 @@ from edx_toggles.toggles.testutils import override_waffle_flag
 from xmodule.modulestore import ModuleStoreEnum
 from xmodule.modulestore.django import modulestore
 from xmodule.modulestore.tests.django_utils import (
-    TEST_DATA_MONGO_MODULESTORE,
+    TEST_DATA_MONGO_AMNESTY_MODULESTORE,
     ModuleStoreTestCase,
     SharedModuleStoreTestCase
 )
@@ -72,7 +72,7 @@ from openedx.features.enterprise_support.tests.mixins.enterprise import Enterpri
 
 log = logging.getLogger(__name__)
 
-QUERY_COUNT_TABLE_BLACKLIST = WAFFLE_TABLES
+QUERY_COUNT_TABLE_IGNORELIST = WAFFLE_TABLES
 
 
 class ViewsExceptionTestCase(UrlResetMixin, ModuleStoreTestCase):  # lint-amnesty, pylint: disable=missing-class-docstring
@@ -154,6 +154,8 @@ def make_mock_thread_data(  # lint-amnesty, pylint: disable=missing-function-doc
         group_name=None,
         commentable_id=None,
         is_commentable_divided=None,
+        anonymous=False,
+        anonymous_to_peers=False,
 ):
     data_commentable_id = (
         commentable_id or course.discussion_topics.get('General', {}).get('id') or "dummy_commentable_id"
@@ -168,6 +170,8 @@ def make_mock_thread_data(  # lint-amnesty, pylint: disable=missing-function-doc
         "resp_skip": 25,
         "resp_limit": 5,
         "group_id": group_id,
+        "anonymous": anonymous,
+        "anonymous_to_peers": anonymous_to_peers,
         "context": (
             ThreadContext.COURSE if get_team(data_commentable_id) is None else ThreadContext.STANDALONE
         )
@@ -219,7 +223,9 @@ def make_mock_perform_request_impl(  # lint-amnesty, pylint: disable=missing-fun
         group_id=None,
         commentable_id=None,
         num_thread_responses=1,
-        thread_list=None
+        thread_list=None,
+        anonymous=False,
+        anonymous_to_peers=False,
 ):
     def mock_perform_request_impl(*args, **kwargs):
         url = args[1]
@@ -236,7 +242,9 @@ def make_mock_perform_request_impl(  # lint-amnesty, pylint: disable=missing-fun
                 thread_id=thread_id,
                 num_children=num_thread_responses,
                 group_id=group_id,
-                commentable_id=commentable_id
+                commentable_id=commentable_id,
+                anonymous=anonymous,
+                anonymous_to_peers=anonymous_to_peers,
             )
         elif "/users/" in url:
             res = {
@@ -265,6 +273,8 @@ def make_mock_request_impl(  # lint-amnesty, pylint: disable=missing-function-do
         commentable_id=None,
         num_thread_responses=1,
         thread_list=None,
+        anonymous=False,
+        anonymous_to_peers=False,
 ):
     impl = make_mock_perform_request_impl(
         course,
@@ -273,7 +283,9 @@ def make_mock_request_impl(  # lint-amnesty, pylint: disable=missing-function-do
         group_id=group_id,
         commentable_id=commentable_id,
         num_thread_responses=num_thread_responses,
-        thread_list=thread_list
+        thread_list=thread_list,
+        anonymous=anonymous,
+        anonymous_to_peers=anonymous_to_peers,
     )
 
     def mock_request_impl(*args, **kwargs):
@@ -406,6 +418,31 @@ class SingleThreadTestCase(ForumsEnableMixin, ModuleStoreTestCase):  # lint-amne
         )
         assert response.status_code == 405
 
+    def test_post_anonymous_to_ta(self, mock_request):
+        text = "dummy content"
+        thread_id = "test_thread_id"
+        mock_request.side_effect = make_mock_request_impl(course=self.course, text=text, thread_id=thread_id,
+                                                          anonymous_to_peers=True)
+
+        request = RequestFactory().get(
+            "dummy_url",
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest"
+        )
+        request.user = self.student
+        request.user.is_community_ta = True
+        response = views.single_thread(
+            request,
+            str(self.course.id),
+            "dummy_discussion_id",
+            "test_thread_id"
+        )
+
+        assert response.status_code == 200
+        response_data = json.loads(response.content.decode('utf-8'))
+        # user is community ta, so response must not have username and user_id fields
+        assert response_data['content'].get('username') is None
+        assert response_data['content'].get('user_id') is None
+
     def test_not_found(self, mock_request):
         request = RequestFactory().get("dummy_url")
         request.user = self.student
@@ -476,32 +513,19 @@ class SingleThreadQueryCountTestCase(ForumsEnableMixin, ModuleStoreTestCase):
     Ensures the number of modulestore queries and number of sql queries are
     independent of the number of responses retrieved for a given discussion thread.
     """
-    MODULESTORE = TEST_DATA_MONGO_MODULESTORE
-
     @ddt.data(
-        # Old mongo with cache. There is an additional SQL query for old mongo
-        # because the first time that disabled_xblocks is queried is in call_single_thread,
-        # vs. the creation of the course (CourseFactory.create). The creation of the
-        # course is outside the context manager that is verifying the number of queries,
-        # and with split mongo, that method ends up querying disabled_xblocks (which is then
-        # cached and hence not queried as part of call_single_thread).
-        (ModuleStoreEnum.Type.mongo, False, 1, 5, 2, 21, 7),
-        (ModuleStoreEnum.Type.mongo, False, 50, 5, 2, 21, 7),
         # split mongo: 3 queries, regardless of thread response size.
-        (ModuleStoreEnum.Type.split, False, 1, 2, 2, 21, 8),
-        (ModuleStoreEnum.Type.split, False, 50, 2, 2, 21, 8),
+        (False, 1, 2, 2, 21, 8),
+        (False, 50, 2, 2, 21, 8),
 
         # Enabling Enterprise integration should have no effect on the number of mongo queries made.
-        (ModuleStoreEnum.Type.mongo, True, 1, 5, 2, 21, 7),
-        (ModuleStoreEnum.Type.mongo, True, 50, 5, 2, 21, 7),
         # split mongo: 3 queries, regardless of thread response size.
-        (ModuleStoreEnum.Type.split, True, 1, 2, 2, 21, 8),
-        (ModuleStoreEnum.Type.split, True, 50, 2, 2, 21, 8),
+        (True, 1, 2, 2, 21, 8),
+        (True, 50, 2, 2, 21, 8),
     )
     @ddt.unpack
     def test_number_of_mongo_queries(
             self,
-            default_store,
             enterprise_enabled,
             num_thread_responses,
             num_uncached_mongo_calls,
@@ -511,7 +535,7 @@ class SingleThreadQueryCountTestCase(ForumsEnableMixin, ModuleStoreTestCase):
             mock_request
     ):
         ContentTypeGatingConfig.objects.create(enabled=True, enabled_as_of=datetime(2018, 1, 1))
-        with modulestore().default_store(default_store):
+        with modulestore().default_store(ModuleStoreEnum.Type.split):
             course = CourseFactory.create(discussion_topics={'dummy discussion': {'id': 'dummy_discussion_id'}})
 
         student = UserFactory.create()
@@ -550,7 +574,7 @@ class SingleThreadQueryCountTestCase(ForumsEnableMixin, ModuleStoreTestCase):
             [num_cached_mongo_calls, AllowPlusOrMinusOneInt(num_cached_sql_queries)],
         ]
         for expected_mongo_calls, expected_sql_queries in cached_calls:
-            with self.assertNumQueries(expected_sql_queries, table_blacklist=QUERY_COUNT_TABLE_BLACKLIST):
+            with self.assertNumQueries(expected_sql_queries, table_ignorelist=QUERY_COUNT_TABLE_IGNORELIST):
                 with check_mongo_calls(expected_mongo_calls):
                     call_single_thread()
 
@@ -1444,6 +1468,11 @@ class UserProfileTestCase(ForumsEnableMixin, UrlResetMixin, ModuleStoreTestCase)
     def test_html(self, mock_request):
         self.check_html(mock_request)
 
+    @override_settings(DISCUSSIONS_MICROFRONTEND_URL="http://test.url")
+    @override_waffle_flag(ENABLE_DISCUSSIONS_MFE, True)
+    def test_html_with_mfe_enabled(self, mock_request):
+        self.check_html(mock_request)
+
     def test_ajax(self, mock_request):
         self.check_ajax(mock_request)
 
@@ -1903,6 +1932,7 @@ class CourseDiscussionTopicsTestCase(DividedDiscussionsTestCase):
     """
     Tests the `divide_discussion_topics` view.
     """
+    MODULESTORE = TEST_DATA_MONGO_AMNESTY_MODULESTORE
 
     def test_non_staff(self):
         """
@@ -1958,6 +1988,7 @@ class CourseDiscussionsHandlerTestCase(DividedDiscussionsTestCase):
     """
     Tests the course_discussion_settings_handler
     """
+    MODULESTORE = TEST_DATA_MONGO_AMNESTY_MODULESTORE
 
     def get_expected_response(self):
         """
@@ -2254,6 +2285,7 @@ class ForumMFETestCase(ForumsEnableMixin, SharedModuleStoreTestCase):
         self.course = CourseFactory.create()
         self.user = UserFactory.create()
         self.staff_user = AdminFactory.create()
+        CourseEnrollmentFactory.create(user=self.user, course_id=self.course.id)
 
     @ddt.data(*itertools.product(("http://test.url", None), (True, False), (True, False)))
     @ddt.unpack
@@ -2268,16 +2300,12 @@ class ForumMFETestCase(ForumsEnableMixin, SharedModuleStoreTestCase):
                 self.client.login(username=username, password='test')
                 response = self.client.get(reverse("forum_form_discussion", args=[self.course.id]))
                 content = response.content.decode('utf8')
-        if mfe_url and is_staff:
-            assert "made some changes to this experience!" in content
-            if toggle_enabled:
-                assert "legacy experience" in content
-                assert "new experience" not in content
-            else:
-                assert "legacy experience" not in content
-                assert "new experience" in content
+        if mfe_url and toggle_enabled:
+            assert "You are viewing an educator only preview of the new discussions experience!" in content
+            assert "legacy experience" in content
+            assert "new experience" not in content
         else:
-            assert "made some changes to this experience!" not in content
+            assert "You are viewing an educator only preview of the new discussions experience!" not in content
 
     @override_settings(DISCUSSIONS_MICROFRONTEND_URL="http://test.url")
     @ddt.data(*itertools.product((True, False), ("legacy", "new", None)))
@@ -2294,7 +2322,7 @@ class ForumMFETestCase(ForumsEnableMixin, SharedModuleStoreTestCase):
                 experience_in_url = f"discussions_experience={experience}"
             response = self.client.get(f"{url}?{experience_in_url}")
             content = response.content.decode('utf8')
-        if (toggle_enabled and experience != "legacy") or experience == "new":
+        if toggle_enabled and experience != "legacy":
             assert "discussions-mfe-tab-embed" in content
         else:
             assert "discussions-mfe-tab-embed" not in content

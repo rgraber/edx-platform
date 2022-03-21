@@ -50,7 +50,10 @@ class CourseSaveForLaterApiView(APIView):
                 "email": "test@edx.org",
                 "course_id": "course-v1:edX+DemoX+2021",
                 "marketing_url": "https://test.com",
-                "org_img_url": "https://test.com/logo.png"
+                "org_img_url": "https://test.com/logo.png",
+                "weeks_to_complete": 7,
+                "min_effort": 4,
+                "max_effort": 5,
 
             }
         """
@@ -80,8 +83,6 @@ class CourseSaveForLaterApiView(APIView):
         )
         course_data = {
             'course': course,
-            'marketing_url': data.get('marketing_url'),
-            'org_img_url': data.get('org_img_url'),
             'type': 'course',
         }
         if send_email(request, email, course_data):
@@ -112,13 +113,12 @@ class ProgramSaveForLaterApiView(APIView):
 
             {
                 "email": "test@edx.org",
-                "uuid": "587f6abe-bfa4-4125-9fbe-4789bf3f97f1"
-
+                "program_uuid": "587f6abe-bfa4-4125-9fbe-4789bf3f97f1"
             }
         """
         user = request.user
         data = request.data
-        program_uuid = data.get('uuid')
+        program_uuid = data.get('program_uuid')
         email = data.get('email')
 
         if getattr(request, 'limited', False):
@@ -126,6 +126,9 @@ class ProgramSaveForLaterApiView(APIView):
 
         if get_email_validation_error(email):
             return Response({'error_code': 'incorrect-email'}, status=400)
+
+        if not program_uuid:
+            return Response({'error_code': 'program-uuid-missing'}, status=400)
 
         program = get_programs(uuid=program_uuid)
         SavedProgram.objects.update_or_create(
