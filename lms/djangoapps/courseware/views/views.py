@@ -91,7 +91,7 @@ from lms.djangoapps.courseware.date_summary import verified_upgrade_deadline_lin
 from lms.djangoapps.courseware.exceptions import CourseAccessRedirect, Redirect
 from lms.djangoapps.courseware.masquerade import is_masquerading_as_specific_student, setup_masquerade
 from lms.djangoapps.courseware.model_data import FieldDataCache
-from lms.djangoapps.courseware.models import BaseStudentModuleHistory, StudentModule
+from lms.djangoapps.courseware.models import BaseStudentModuleHistory, StudentModule, FinancialAssistanceConfiguration
 from lms.djangoapps.courseware.permissions import (
     MASQUERADE_AS_STUDENT,
     VIEW_COURSE_HOME,
@@ -2132,3 +2132,19 @@ def get_learner_username(learner_identifier):
     learner = User.objects.filter(Q(username=learner_identifier) | Q(email=learner_identifier)).first()
     if learner:
         return learner.username
+
+
+@login_required
+def is_eligible_for_financial_aid(course_id):
+    """
+    Sends a get request to edx-financial-assistance to retrieve financial assistance eligibility criteria for a course.
+
+    Returns true if course is eligible for financial aid and vice versa.
+    Also returns the reason why the course isn't eligible (if any)
+    """
+    is_eligible_url = '/core/api/course_eligibility/'
+    financial_assistance_configuration = FinancialAssistanceConfiguration.current()
+    if financial_assistance_configuration.enabled:
+        response = requests.get(f"{financial_assistance_configuration.api_url}{is_eligible_url}{course_id}/")
+        if response.status_code == 200:
+
