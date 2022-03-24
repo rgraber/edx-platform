@@ -4987,3 +4987,6 @@ DISCUSSION_MODERATION_CLOSE_REASON_CODES = {
     "duplicate": _("Post is a duplicate"),
     "off-topic": _("Post is off-topic"),
 }
+################# Financial Assistance #################
+FINANCIAL_ASSISTANCE_OAUTH2_APP_KEY = 'replace-me'
+FINANCIAL_ASSISTANCE_OAUTH2_SECRET_KEY = 'replace-me'

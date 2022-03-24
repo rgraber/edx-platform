@@ -450,3 +450,11 @@ WEBPACK_LOADER['DEFAULT']['TIMEOUT'] = 5
 # See if the developer has any local overrides.
 if os.path.isfile(join(dirname(abspath(__file__)), 'private.py')):
     from .private import *  # pylint: disable=import-error,wildcard-import
+
+################# Financial Assistance #################
+FINANCIAL_ASSISTANCE_OAUTH2_APP_KEY = os.environ.get(
+    'FINANCIAL_ASSISTANCE_OAUTH2_APP_KEY', 'financial_assistance-worker-service-key'
+)
+FINANCIAL_ASSISTANCE_OAUTH2_SECRET_KEY = os.environ.get(
+    'FINANCIAL_ASSISTANCE_OAUTH2_SECRET_KEY', 'financial_assistance-worker-secret-key'
+)

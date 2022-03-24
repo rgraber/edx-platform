@@ -9,6 +9,7 @@ import urllib
 from collections import OrderedDict, namedtuple
 from datetime import datetime
 from urllib.parse import quote_plus
+from edx_rest_api_client.client import OAuthAPIClient
 
 import bleach
 import requests
@@ -2145,6 +2146,52 @@ def is_eligible_for_financial_aid(course_id):
     is_eligible_url = '/core/api/course_eligibility/'
     financial_assistance_configuration = FinancialAssistanceConfiguration.current()
     if financial_assistance_configuration.enabled:
-        response = requests.get(f"{financial_assistance_configuration.api_url}{is_eligible_url}{course_id}/")
+        client = OAuthAPIClient(
+            settings.LMS_ROOT_URL,
+            settings.FINANCIAL_ASSISTANCE_OAUTH2_APP_KEY,
+            settings.FINANCIAL_ASSISTANCE_OAUTH2_SECRET_KEY
+        )
+        response = client.request('GET', f"{financial_assistance_configuration.api_url}{is_eligible_url}{course_id}/")
         if response.status_code == 200:
+            return True
 
+
+@login_required
+def get_financial_assistance_application_status(request, course_id):
+    """
+    Given the course_id, sends a get request to edx-financial-assistance to retrieve
+    financial assistance application status for the logged-in user.
+    """
+    user = request.user
+    application_status_url = \
+        f"/core/api/financial_assistance_application/status/?course_id={course_id}&lms_user_id={user.id}/"
+    financial_assistance_configuration = FinancialAssistanceConfiguration.current()
+    if financial_assistance_configuration.enabled:
+        client = OAuthAPIClient(
+            settings.LMS_ROOT_URL,
+            settings.FINANCIAL_ASSISTANCE_OAUTH2_APP_KEY,
+            settings.FINANCIAL_ASSISTANCE_OAUTH2_SECRET_KEY
+        )
+        response = client.request('GET', f"{financial_assistance_configuration.api_url}{application_status_url}/")
+        if response.status_code == 200:
+            return response.content
+
+
+@login_required
+def create_financial_assistance_application(form_data):
+    """
+    Sends a post request to edx-financial-assistance to create a new application for financial assistance application.
+    """
+    create_application_url = '/core/api/financial_assistance_applications'
+    financial_assistance_configuration = FinancialAssistanceConfiguration.current()
+    if financial_assistance_configuration.enabled:
+        client = OAuthAPIClient(
+            settings.LMS_ROOT_URL,
+            settings.FINANCIAL_ASSISTANCE_OAUTH2_APP_KEY,
+            settings.FINANCIAL_ASSISTANCE_OAUTH2_SECRET_KEY
+        )
+        response = client.request(
+            'GET', f"{financial_assistance_configuration.api_url}{create_application_url}/", params=form_data
+        )
+        if response.status_code == 200:
+            return True
