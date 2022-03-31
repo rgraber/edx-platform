@@ -16,8 +16,7 @@
         "modules": false
       }
     ],
-    "@babel/preset-react",
-    "@babel/preset-env"
+    "babel-preset-react",
   ],
   "env": {
     "test": {
@@ -25,10 +24,10 @@
         [
           "env",
           {
-            "modules": "commonjs"
+            "modules": "commonjs",
           }
         ]
       ]
     }
-  }
+  },
 }
