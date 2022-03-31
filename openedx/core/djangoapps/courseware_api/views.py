@@ -25,7 +25,7 @@ from xmodule.x_module import PUBLIC_VIEW, STUDENT_VIEW
 from common.djangoapps.course_modes.models import CourseMode
 from common.djangoapps.util.views import expose_header
 from lms.djangoapps.edxnotes.helpers import is_feature_enabled
-from lms.djangoapps.certificates.api import get_certificate_url
+from lms.djangoapps.certificates.api import certificates_viewable_for_course, get_certificate_url
 from lms.djangoapps.certificates.models import GeneratedCertificate
 from lms.djangoapps.course_api.api import course_detail
 from lms.djangoapps.course_goals.models import UserActivity
@@ -98,6 +98,7 @@ class CoursewareMeta:
             course_key=course_key,
             is_global_staff=self.original_user_is_global_staff,
         )
+        self.can_view_certificate = certificates_viewable_for_course(self.course)
 
     def __getattr__(self, name):
         return getattr(self.overview, name)
@@ -452,6 +453,7 @@ class CoursewareInformation(RetrieveAPIView):
         * user_has_passing_grade: Whether or not the effective user's grade is equal to or above the courses minimum
             passing grade
         * course_exit_page_is_active: Flag for the learning mfe on whether or not the course exit page should display
+        * can_view_certificate: Flag to determine whether or not the learner can view their course certificate.
         * certificate_data: data regarding the effective user's certificate for the given course
         * verify_identity_url: URL for a learner to verify their identity. Only returned for learners enrolled in a
             verified mode. Will update to reverify URL if necessary.
