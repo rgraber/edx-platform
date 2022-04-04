@@ -132,6 +132,7 @@ class ProgressTabSerializer(VerifiedModeSerializer):
     Serializer for progress tab
     """
     access_expiration = serializers.DictField()
+    can_view_certificate = serializers.BooleanField()
     certificate_data = CertificateDataSerializer()
     completion_summary = serializers.DictField()
     course_grade = CourseGradeSerializer()

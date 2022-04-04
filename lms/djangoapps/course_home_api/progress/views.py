@@ -14,6 +14,7 @@ from rest_framework.response import Response
 
 from xmodule.modulestore.django import modulestore
 from common.djangoapps.student.models import CourseEnrollment
+from lms.djangoapps.certificates.api import certificates_viewable_for_course
 from lms.djangoapps.course_home_api.progress.serializers import ProgressTabSerializer
 from lms.djangoapps.course_home_api.toggles import course_home_mfe_progress_tab_is_active
 from lms.djangoapps.courseware.access import has_access, has_ccx_coach_role
@@ -244,6 +245,7 @@ class ProgressTabView(RetrieveAPIView):
 
         data = {
             'access_expiration': access_expiration,
+            'can_view_certificate': certificates_viewable_for_course(enrollment.course_overview),
             'certificate_data': get_cert_data(student, course, enrollment_mode, course_grade),
             'completion_summary': get_course_blocks_completion_summary(course_key, student),
             'course_grade': course_grade,
