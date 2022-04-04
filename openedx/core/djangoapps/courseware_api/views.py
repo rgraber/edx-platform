@@ -98,7 +98,7 @@ class CoursewareMeta:
             course_key=course_key,
             is_global_staff=self.original_user_is_global_staff,
         )
-        self.can_view_certificate = certificates_viewable_for_course(self.course)
+        self.can_view_certificate = certificates_viewable_for_course(self.enrollment_object.course_overview)
 
     def __getattr__(self, name):
         return getattr(self.overview, name)
@@ -453,7 +453,9 @@ class CoursewareInformation(RetrieveAPIView):
         * user_has_passing_grade: Whether or not the effective user's grade is equal to or above the courses minimum
             passing grade
         * course_exit_page_is_active: Flag for the learning mfe on whether or not the course exit page should display
-        * can_view_certificate: Flag to determine whether or not the learner can view their course certificate.
+        * can_view_certificate: Flag to determine whether or not the learner can view their course certificate. We pass
+            This seperately from certificate_data because certificate_data is only populated for passing students who
+            have earned a certificate already.
         * certificate_data: data regarding the effective user's certificate for the given course
         * verify_identity_url: URL for a learner to verify their identity. Only returned for learners enrolled in a
             verified mode. Will update to reverify URL if necessary.
