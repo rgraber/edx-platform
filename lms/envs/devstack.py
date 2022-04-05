@@ -445,16 +445,16 @@ PROCTORING_USER_OBFUSCATION_KEY = '85920908f28904ed733fe576320db18cabd7b6cd'
 #################### Webpack Configuration Settings ##############################
 WEBPACK_LOADER['DEFAULT']['TIMEOUT'] = 5
 
+################# Financial Assistance #################
+FINANCIAL_ASSISTANCE_OAUTH2_APP_KEY = os.environ.get(
+    'FINANCIAL_ASSISTANCE_OAUTH2_APP_KEY', 'financial_assistance-lms-service-key'
+)
+FINANCIAL_ASSISTANCE_OAUTH2_SECRET_KEY = os.environ.get(
+    'FINANCIAL_ASSISTANCE_OAUTH2_SECRET_KEY', 'financial_assistance-lms-service-secret'
+)
+
 ################# New settings must go ABOVE this line #################
 ########################################################################
 # See if the developer has any local overrides.
 if os.path.isfile(join(dirname(abspath(__file__)), 'private.py')):
     from .private import *  # pylint: disable=import-error,wildcard-import
-
-################# Financial Assistance #################
-FINANCIAL_ASSISTANCE_OAUTH2_APP_KEY = os.environ.get(
-    'FINANCIAL_ASSISTANCE_OAUTH2_APP_KEY', 'financial_assistance-worker-service-key'
-)
-FINANCIAL_ASSISTANCE_OAUTH2_SECRET_KEY = os.environ.get(
-    'FINANCIAL_ASSISTANCE_OAUTH2_SECRET_KEY', 'financial_assistance-worker-secret-key'
-)

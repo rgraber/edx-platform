@@ -10,6 +10,7 @@ from collections import OrderedDict, namedtuple
 from datetime import datetime
 from urllib.parse import quote_plus
 from edx_rest_api_client.client import OAuthAPIClient
+from oauth2_provider.models import Application
 
 import bleach
 import requests
@@ -2135,7 +2136,7 @@ def get_learner_username(learner_identifier):
         return learner.username
 
 
-@login_required
+# @login_required
 def is_eligible_for_financial_aid(course_id):
     """
     Sends a get request to edx-financial-assistance to retrieve financial assistance eligibility criteria for a course.
