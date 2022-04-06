@@ -960,6 +960,31 @@ FEATURES = {
     # .. toggle_target_removal_date: None
     # .. toggle_tickets: 'https://openedx.atlassian.net/browse/MST-1348'
     'ENABLE_INTEGRITY_SIGNATURE': False,
+
+    # .. toggle_name: FEATURES['ENABLE_NEW_BULK_EMAIL_EXPERIENCE']
+    # .. toggle_implementation: DjangoSetting
+    # .. toggle_default: False
+    # .. toggle_description: When true, replaces the bulk email tool found on the
+    #   instructor dashboard with a link to the new communications MFE version instead.
+    #   Stting the tool to false will leave the old bulk email tool experience in place.
+    # .. toggle_use_cases: opt_in
+    # .. toggle_creation_date: 2022-03-21
+    # .. toggle_target_removal_date: None
+    # .. toggle_tickets: 'https://openedx.atlassian.net/browse/MICROBA-1758'
+    'ENABLE_NEW_BULK_EMAIL_EXPERIENCE': False,
+
+    # .. toggle_name: MARK_LIBRARY_CONTENT_BLOCK_COMPLETE_ON_VIEW
+    # .. toggle_implementation: DjangoSetting
+    # .. toggle_default: False
+    # .. toggle_description: If enabled, the Library Content Block is marked as complete when users view it.
+    #   Otherwise (by default), all children of this block must be completed.
+    # .. toggle_use_cases: open_edx
+    # .. toggle_creation_date: 2022-03-22
+    # .. toggle_target_removal_date: None
+    # .. toggle_tickets: https://github.com/edx/edx-platform/pull/28268
+    # .. toggle_warnings: For consistency in user-experience, keep the value in sync with the setting of the same name
+    #   in the LMS and CMS.
+    'MARK_LIBRARY_CONTENT_BLOCK_COMPLETE_ON_VIEW': False,
 }
 
 # Specifies extra XBlock fields that should available when requested via the Course Blocks API
@@ -1261,7 +1286,7 @@ DEFAULT_TEMPLATE_ENGINE_DIRS = DEFAULT_TEMPLATE_ENGINE['DIRS'][:]
 
 AUTHENTICATION_BACKENDS = [
     'rules.permissions.ObjectPermissionBackend',
-    'openedx.core.djangoapps.oauth_dispatch.dot_overrides.backends.EdxRateLimitedAllowAllUsersModelBackend',
+    'django.contrib.auth.backends.AllowAllUsersModelBackend',
     'bridgekeeper.backends.RulePermissionBackend',
 ]
 
@@ -2132,9 +2157,6 @@ MIDDLEWARE = [
 
     'lms.djangoapps.discussion.django_comment_client.utils.ViewNameMiddleware',
     'codejail.django_integration.ConfigureCodeJailMiddleware',
-
-    # catches any uncaught RateLimitExceptions and returns a 403 instead of a 500
-    'ratelimitbackend.middleware.RateLimitMiddleware',
 
     # for expiring inactive sessions
     'openedx.core.djangoapps.session_inactivity_timeout.middleware.SessionInactivityTimeout',
@@ -3061,10 +3083,6 @@ INSTALLED_APPS = [
     'openedx.core.djangoapps.content.block_structure.apps.BlockStructureConfig',
     'lms.djangoapps.course_blocks',
 
-
-    # Coursegraph
-    'openedx.core.djangoapps.coursegraph.apps.CoursegraphConfig',
-
     # Mailchimp Syncing
     'lms.djangoapps.mailing',
 
@@ -3185,8 +3203,6 @@ INSTALLED_APPS = [
 
     # Learning Sequence Navigation
     'openedx.core.djangoapps.content.learning_sequences.apps.LearningSequencesConfig',
-
-    'ratelimitbackend',
 
     # Database-backed Organizations App (http://github.com/edx/edx-organizations)
     'organizations',
@@ -4588,6 +4604,18 @@ COURSE_ENROLLMENT_MODES = {
         "display_name": _("Paid Executive Education"),
         "min_price": 1
     },
+    "unpaid-bootcamp": {
+        "id": 11,
+        "slug": "unpaid-bootcamp",
+        "display_name": _("Unpaid Bootcamp"),
+        "min_price": 0
+    },
+    "paid-bootcamp": {
+        "id": 12,
+        "slug": "paid-bootcamp",
+        "display_name": _("Paid Bootcamp"),
+        "min_price": 1
+    },
 }
 
 CONTENT_TYPE_GATE_GROUP_IDS = {
@@ -4802,6 +4830,40 @@ DISCUSSIONS_MFE_FEEDBACK_URL = None
 # .. toggle_creation_date: 2021-12-03
 # .. toggle_tickets: https://openedx.atlassian.net/browse/VAN-666
 ENABLE_AUTHN_RESET_PASSWORD_HIBP_POLICY = False
+# .. toggle_name: ENABLE_AUTHN_REGISTER_HIBP_POLICY
+# .. toggle_implementation: DjangoSetting
+# .. toggle_default: False
+# .. toggle_description: When enabled, this toggle activates the use of the password validation
+#   HIBP Policy on Authn MFE's registration.
+# .. toggle_use_cases: open_edx
+# .. toggle_creation_date: 2022-03-25
+# .. toggle_tickets: https://openedx.atlassian.net/browse/VAN-669
+ENABLE_AUTHN_REGISTER_HIBP_POLICY = False
+HIBP_REGISTRATION_PASSWORD_FREQUENCY_THRESHOLD = 3
+
+# .. toggle_name: ENABLE_AUTHN_LOGIN_NUDGE_HIBP_POLICY
+# .. toggle_implementation: DjangoSetting
+# .. toggle_default: False
+# .. toggle_description: When enabled, this toggle activates the use of the password validation
+#   on Authn MFE's login.
+# .. toggle_use_cases: temporary
+# .. toggle_creation_date: 2022-03-29
+# .. toggle_target_removal_date: None
+# .. toggle_tickets: https://openedx.atlassian.net/browse/VAN-668
+ENABLE_AUTHN_LOGIN_NUDGE_HIBP_POLICY = False
+HIBP_LOGIN_NUDGE_PASSWORD_FREQUENCY_THRESHOLD = 3
+
+# .. toggle_name: ENABLE_AUTHN_LOGIN_BLOCK_HIBP_POLICY
+# .. toggle_implementation: DjangoSetting
+# .. toggle_default: False
+# .. toggle_description: When enabled, this toggle activates the use of the password validation
+#   on Authn MFE's login.
+# .. toggle_use_cases: temporary
+# .. toggle_creation_date: 2022-03-29
+# .. toggle_target_removal_date: None
+# .. toggle_tickets: https://openedx.atlassian.net/browse/VAN-667
+ENABLE_AUTHN_LOGIN_BLOCK_HIBP_POLICY = False
+HIBP_LOGIN_BLOCK_PASSWORD_FREQUENCY_THRESHOLD = 5
 
 ############### Settings for the ace_common plugin #################
 ACE_ENABLED_CHANNELS = ['django_email']
