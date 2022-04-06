@@ -337,6 +337,22 @@ class RegistrationFormFactory:
         "marketing_emails_opt_in",
     ]
 
+    REGISTRATION_EXTRA_FIELDS = {
+        'confirm_email': 'hidden',
+        'level_of_education': 'hidden',
+        'gender': 'optional',
+        'year_of_birth': 'optional',
+        'mailing_address': 'required',
+        'goals': 'optional',
+        'honor_code': 'hidden',
+        'terms_of_service': 'hidden',
+        'city': 'required',
+        'country': 'hidden',
+        'first_name': 'required',
+        'last_name': 'required',
+        'state': 'required',
+    }
+
     def _is_field_visible(self, field_name):
         """Check whether a field is visible based on Django settings. """
         return self._extra_fields_setting.get(field_name) in ["required", "optional", "optional-exposed"]
@@ -356,9 +372,9 @@ class RegistrationFormFactory:
 
         # Backwards compatibility: Honor code is required by default, unless
         # explicitly set to "optional" in Django settings.
-        self._extra_fields_setting = copy.deepcopy(configuration_helpers.get_value('REGISTRATION_EXTRA_FIELDS'))
+        self._extra_fields_setting = copy.deepcopy(self.REGISTRATION_EXTRA_FIELDS)
         if not self._extra_fields_setting:
-            self._extra_fields_setting = copy.deepcopy(settings.REGISTRATION_EXTRA_FIELDS)
+            self._extra_fields_setting = copy.deepcopy(self.REGISTRATION_EXTRA_FIELDS)
         self._extra_fields_setting["honor_code"] = self._extra_fields_setting.get("honor_code", "required")
 
         if settings.MARKETING_EMAILS_OPT_IN:
