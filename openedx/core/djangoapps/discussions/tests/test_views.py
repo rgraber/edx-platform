@@ -350,6 +350,7 @@ class DataTest(AuthorizedApiTest):
             'plugin_configuration': {
                 'allow_anonymous': False,
                 'custom_field': 'custom_value',
+                'reported_content_email_notifications': True,
             },
         }
         response = self._post(payload)
@@ -357,6 +358,7 @@ class DataTest(AuthorizedApiTest):
         assert data['plugin_configuration'] == {
             'allow_anonymous': False,
             'custom_field': 'custom_value',
+            'reported_content_email_notifications': True,
         }
 
         course = self.store.get_course(self.course.id)
