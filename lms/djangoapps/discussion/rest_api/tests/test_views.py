@@ -2313,7 +2313,8 @@ class CourseDiscussionSettingsAPIViewTest(APITestCase, UrlResetMixin, ModuleStor
             'divided_course_wide_discussions': [],
             'id': 1,
             'division_scheme': 'cohort',
-            'available_division_schemes': ['cohort']
+            'available_division_schemes': ['cohort'],
+            'reported_content_email_notifications': False,
         }
 
     def patch_request(self, data, headers=None):

@@ -47,7 +47,7 @@ DEFAULT_LEGACY_CONFIGURATION = {
     'divided_course_wide_discussions': [],
     'division_scheme': 'none',
     'available_division_schemes': [],
-
+    'reported_content_email_notifications': False,
 }
 DEFAULT_LTI_CONFIGURATION = {
     'lti_1p1_client_key': '',
